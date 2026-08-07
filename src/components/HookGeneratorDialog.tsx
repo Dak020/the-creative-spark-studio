@@ -52,13 +52,6 @@ export function HookGeneratorDialog({
         contentStyle: string;
       }
     | undefined;
-
-    product: string;
-    productUrl?: string | null;
-    audience: string;
-    platform: string;
-    contentStyle: string;
-  };
 }) {
   const qc = useQueryClient();
   const generate = useServerFn(generateHooksFn);
