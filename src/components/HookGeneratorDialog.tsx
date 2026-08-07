@@ -43,7 +43,16 @@ export function HookGeneratorDialog({
   onOpenChange: (open: boolean) => void;
   projectId: string | null;
   winners: Array<{ id: string; text: string }>;
-  defaults?: {
+  defaults?:
+    | {
+        product: string;
+        productUrl?: string | null;
+        audience: string;
+        platform: string;
+        contentStyle: string;
+      }
+    | undefined;
+
     product: string;
     productUrl?: string | null;
     audience: string;

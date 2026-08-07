@@ -100,15 +100,21 @@ function PerformancePage() {
       const userId = userRes.user?.id;
       if (!userId) throw new Error("Not signed in");
       const video = data?.videos.find((v) => v.id === videoId);
-      const numeric = Object.fromEntries(
-        (Object.keys(values) as FieldKey[]).map((k) => [k, Number(values[k]) || 0]),
-      );
+      const num = (k: FieldKey) => Number(values[k]) || 0;
       const { error } = await supabase.from("performance_metrics").insert({
         user_id: userId,
         generated_video_id: videoId,
         hook_id: video?.hook_id ?? null,
         platform,
-        ...numeric,
+        views: num("views"),
+        avg_watch_time: num("avg_watch_time"),
+        completion_rate: num("completion_rate"),
+        likes: num("likes"),
+        comments: num("comments"),
+        shares: num("shares"),
+        saves: num("saves"),
+        clicks: num("clicks"),
+        conversions: num("conversions"),
       });
       if (error) throw error;
 
@@ -116,15 +122,16 @@ function PerformancePage() {
         await supabase
           .from("hooks")
           .update({
-            views: numeric.views,
-            retention: numeric.completion_rate,
-            shares: numeric.shares,
-            saves: numeric.saves,
-            conversion_rate: numeric.views ? (numeric.conversions / numeric.views) * 100 : 0,
-            performance_score: Math.min(100, Math.round(numeric.completion_rate)),
+            views: num("views"),
+            retention: num("completion_rate"),
+            shares: num("shares"),
+            saves: num("saves"),
+            conversion_rate: num("views") ? (num("conversions") / num("views")) * 100 : 0,
+            performance_score: Math.min(100, Math.round(num("completion_rate"))),
           })
           .eq("id", video.hook_id);
       }
+
     },
     onSuccess: () => {
       toast.success("Metrics recorded");
