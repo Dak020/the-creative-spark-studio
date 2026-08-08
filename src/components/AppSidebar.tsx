@@ -15,7 +15,9 @@ import { Button } from "@/components/ui/button";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Studio", url: "/studio", icon: Clapperboard },
   { title: "Projects", url: "/projects", icon: FolderKanban },
+
   { title: "Media Library", url: "/media", icon: Film },
   { title: "Hook Library", url: "/hooks", icon: Quote },
   { title: "Performance", url: "/performance", icon: BarChart3 },

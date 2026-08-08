@@ -170,6 +170,7 @@ export type Database = {
           emotional_trigger: string | null
           id: string
           is_winner: boolean
+          notes: string | null
           performance_score: number
           platform: string
           project_id: string | null
@@ -191,6 +192,7 @@ export type Database = {
           emotional_trigger?: string | null
           id?: string
           is_winner?: boolean
+          notes?: string | null
           performance_score?: number
           platform?: string
           project_id?: string | null
@@ -212,6 +214,7 @@ export type Database = {
           emotional_trigger?: string | null
           id?: string
           is_winner?: boolean
+          notes?: string | null
           performance_score?: number
           platform?: string
           project_id?: string | null
