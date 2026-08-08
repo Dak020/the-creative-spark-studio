@@ -216,6 +216,12 @@ function StudioPage() {
       .map((id) => (hooks ?? []).find((h) => h.id === id))
       .filter((h): h is NonNullable<typeof h> => Boolean(h));
 
+    const projectId = await ensureStudioProject(user.id);
+    if (!projectId) {
+      toast.error("Could not prepare the studio project.");
+      return;
+    }
+
     setRendering(true);
     const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), VARIANTS, CLIP_SECONDS);
     const items: BatchItem[] = [];
@@ -226,7 +232,7 @@ function StudioPage() {
           .from("video_recipes")
           .insert({
             user_id: user.id,
-            project_id: null as unknown as string,
+            project_id: projectId,
             hook_id: hook.id,
             media_asset_id: asset.id,
             duration: CLIP_SECONDS,
@@ -246,7 +252,7 @@ function StudioPage() {
           .from("render_jobs")
           .insert({
             user_id: user.id,
-            project_id: null as unknown as string,
+            project_id: projectId,
             recipe_id: recipe.id,
             status: "queued",
             progress: 0,
@@ -312,7 +318,7 @@ function StudioPage() {
 
         await supabase.from("generated_videos").insert({
           user_id: user.id,
-          project_id: null as unknown as string,
+          project_id: projectId,
           render_job_id: item.jobId,
           recipe_id: null,
           hook_id: item.hookId,
@@ -580,6 +586,22 @@ function StudioPage() {
       </section>
     </div>
   );
+}
+
+async function ensureStudioProject(userId: string) {
+  const { data: existing } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("name", "Studio")
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) return existing.id;
+  const { data } = await supabase
+    .from("projects")
+    .insert({ user_id: userId, name: "Studio", platform: "both", content_style: "ugc" })
+    .select("id")
+    .single();
+  return data?.id ?? null;
 }
 
 function probeVideo(file: File) {
