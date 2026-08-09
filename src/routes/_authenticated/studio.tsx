@@ -130,6 +130,8 @@ function StudioPage() {
       }
       setUploading(true);
       try {
+        const projectId = await ensureStudioProject(user.id);
+        if (!projectId) throw new Error("Could not prepare the studio project.");
         const meta = await probeVideo(file);
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
         const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
@@ -142,6 +144,7 @@ function StudioPage() {
           .from("media_assets")
           .insert({
             user_id: user.id,
+            project_id: projectId,
             storage_path: path,
             filename: file.name,
             duration: meta.duration,
@@ -152,10 +155,17 @@ function StudioPage() {
           })
           .select("id")
           .single();
-        if (error) throw new Error(error.message);
+        if (error) {
+          await supabase.storage.from("media").remove([path]);
+          throw new Error(error.message);
+        }
 
         setAssetId(data.id);
-        await qc.invalidateQueries({ queryKey: ["studio-assets"] });
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ["studio-assets"] }),
+          qc.invalidateQueries({ queryKey: ["media"] }),
+          qc.invalidateQueries({ queryKey: ["project"] }),
+        ]);
         toast.success("Source video uploaded");
       } catch (e) {
         toast.error((e as Error).message);
