@@ -106,7 +106,7 @@ function StudioPage() {
   // Previously rendered variants, so results survive a page reload.
   const { data: pastResults } = useQuery({
     queryKey: ["studio-results"],
-    queryFn: async () => {
+    queryFn: async (): Promise<BatchItem[]> => {
       const { data } = await supabase
         .from("generated_videos")
         .select("id, hook_text, output_url, status, created_at")
@@ -127,7 +127,8 @@ function StudioPage() {
     },
   });
 
-  const results = batch.length > 0 ? batch : (pastResults ?? []);
+  const results: BatchItem[] = batch.length > 0 ? batch : (pastResults ?? []);
+
 
 
   const asset = useMemo(
