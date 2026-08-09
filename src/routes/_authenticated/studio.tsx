@@ -592,7 +592,7 @@ function StudioPage() {
       {/* 4. Results */}
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">4. Results</h2>
-        {batch.length === 0 ? (
+        {results.length === 0 ? (
           <EmptyState
             icon={Film}
             title="No variants yet"
@@ -600,7 +600,7 @@ function StudioPage() {
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {batch.map((b, i) => (
+            {results.map((b, i) => (
               <div key={b.jobId} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {b.url ? (
@@ -615,14 +615,17 @@ function StudioPage() {
                 <div className="flex items-center justify-between gap-2">
                   <StatusPill status={b.status} />
                   {b.url ? (
-                    <Button asChild size="sm" variant="secondary">
-                      <a href={b.url} download={b.filename}>
-                        <Download className="size-3.5" />
-                        Download
-                      </a>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void downloadVariant(b.url!, b.filename ?? `variant-${i + 1}.webm`)}
+                    >
+                      <Download className="size-3.5" />
+                      Download
                     </Button>
                   ) : null}
                 </div>
+
                 {b.status !== "completed" && b.status !== "failed" ? (
                   <Progress value={b.progress} className="h-1.5" />
                 ) : null}
