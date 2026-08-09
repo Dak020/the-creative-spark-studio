@@ -4,7 +4,9 @@ import { toast } from "sonner";
 import { Film, Loader2, Search, Trash2, Upload, Play, Tag } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { MEDIA_CATEGORIES } from "@/lib/constants";
+import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, fmtDate } from "@/lib/db";
+
 import { EmptyState } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,30 +116,35 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
 
   const upload = useMutation({
     mutationFn: async (files: FileList) => {
-      const { data: userRes } = await supabase.auth.getUser();
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      if (userErr) throw new Error(`Auth check failed: ${userErr.message}`);
       const userId = userRes.user?.id;
-      if (!userId) throw new Error("Not signed in");
+      if (!userId) throw new Error("You are signed out — sign in again to upload.");
 
       let created = 0;
+      const problems: string[] = [];
+
       for (const file of Array.from(files)) {
-        if (!/\.(mp4|mov|m4v)$/i.test(file.name)) {
-          toast.error(`${file.name}: only MP4 and MOV files are supported`);
-          continue;
-        }
-        if (file.size > 300 * 1024 * 1024) {
-          toast.error(`${file.name}: file is larger than 300MB`);
+        const invalid = videoFileError(file);
+        if (invalid) {
+          problems.push(invalid);
           continue;
         }
 
-        const meta = await probeVideo(file);
+        const meta = await withTimeout(probeVideo(file), 15000, {
+          duration: 0,
+          width: 0,
+          height: 0,
+          thumb: null,
+        });
         const id = crypto.randomUUID();
-        const ext = file.name.split(".").pop() ?? "mp4";
+        const ext = videoExtension(file);
         const path = `${userId}/${id}.${ext}`;
 
         const { error: upErr } = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4" });
-        if (upErr) throw upErr;
+        if (upErr) throw new Error(`Storage upload failed for ${file.name}: ${upErr.message}`);
 
         let thumbnailUrl: string | null = null;
         if (meta.thumb) {
@@ -153,28 +160,35 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           }
         }
 
-        const { error: insErr } = await supabase.from("media_assets").insert({
-          user_id: userId,
-          project_id: projectId ?? null,
-          storage_path: path,
-          thumbnail_url: thumbnailUrl,
-          filename: file.name,
-          duration: meta.duration,
-          width: meta.width,
-          height: meta.height,
-          size_bytes: file.size,
-          category: "Other",
-          tags: [],
-        });
-        if (insErr) {
+        const { data: inserted, error: insErr } = await supabase
+          .from("media_assets")
+          .insert({
+            user_id: userId,
+            project_id: projectId ?? null,
+            storage_path: path,
+            thumbnail_url: thumbnailUrl,
+            filename: file.name || `clip.${ext}`,
+            duration: meta.duration,
+            width: meta.width,
+            height: meta.height,
+            size_bytes: file.size,
+            category: "Other",
+            tags: [],
+          })
+          .select("id")
+          .single();
+        if (insErr || !inserted) {
           await supabase.storage.from("media").remove([path]);
-          throw insErr;
+          throw new Error(`Saving ${file.name} failed: ${insErr?.message ?? "no record returned"}`);
         }
         created += 1;
       }
-      if (created === 0) throw new Error("No clips were uploaded");
+      if (created === 0) {
+        throw new Error(problems.join(" ") || "No clips were uploaded.");
+      }
       return created;
     },
+
     onSuccess: (created) => {
       toast.success(created === 1 ? "Upload complete" : `${created} clips uploaded`);
       qc.invalidateQueries({ queryKey: ["media"] });
