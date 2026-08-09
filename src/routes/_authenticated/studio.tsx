@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HOOK_CATEGORIES } from "@/lib/constants";
+import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, signedUrl } from "@/lib/db";
 import { planStartOffsets, renderVariant } from "@/lib/render/browser-render";
+
 
 const CLIP_SECONDS = 8;
 const OUT_W = 1080;
@@ -123,22 +125,30 @@ function StudioPage() {
 
   const onUpload = useCallback(
     async (file: File) => {
-      if (!user) return;
-      if (!/\.(mp4|mov|m4v)$/i.test(file.name)) {
-        toast.error("Upload an MP4 or MOV file.");
+      if (!user) {
+        toast.error("You are signed out — sign in again to upload.");
+        return;
+      }
+      const invalid = videoFileError(file);
+      if (invalid) {
+        toast.error(invalid);
         return;
       }
       setUploading(true);
       try {
         const projectId = await ensureStudioProject(user.id);
         if (!projectId) throw new Error("Could not prepare the studio project.");
-        const meta = await probeVideo(file);
-        const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
+        const meta = await withTimeout(probeVideo(file), 15000, {
+          duration: 0,
+          width: 0,
+          height: 0,
+        });
+        const ext = videoExtension(file);
         const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
         const { error: upErr } = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4", upsert: false });
-        if (upErr) throw new Error(upErr.message);
+        if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
 
         const { data, error } = await supabase
           .from("media_assets")
@@ -146,7 +156,7 @@ function StudioPage() {
             user_id: user.id,
             project_id: projectId,
             storage_path: path,
-            filename: file.name,
+            filename: file.name || `clip.${ext}`,
             duration: meta.duration,
             width: meta.width,
             height: meta.height,
@@ -155,9 +165,9 @@ function StudioPage() {
           })
           .select("id")
           .single();
-        if (error) {
+        if (error || !data) {
           await supabase.storage.from("media").remove([path]);
-          throw new Error(error.message);
+          throw new Error(`Saving the clip failed: ${error?.message ?? "no record returned"}`);
         }
 
         setAssetId(data.id);
@@ -176,6 +186,7 @@ function StudioPage() {
     },
     [qc, user],
   );
+
 
   async function saveHook() {
     if (!user) return;
