@@ -114,15 +114,19 @@ function StudioPage() {
         .limit(VARIANTS);
       const rows = data ?? [];
       return Promise.all(
-        rows.map(async (r) => ({
-          jobId: r.id,
-          hookId: "",
-          hookText: r.hook_text ?? "",
-          status: (r.status === "completed" ? "completed" : "failed") as BatchItem["status"],
-          progress: 100,
-          url: (await signedUrl("renders", r.output_url, 60 * 60 * 6)) ?? undefined,
-          filename: `variant-${r.id.slice(0, 6)}.webm`,
-        })),
+        rows.map(async (r): Promise<BatchItem> => {
+          const url = await signedUrl("renders", r.output_url, 60 * 60 * 6);
+          return {
+            jobId: r.id,
+            hookId: "",
+            hookText: r.hook_text ?? "",
+            status: r.status === "completed" ? "completed" : "failed",
+            progress: 100,
+            ...(url ? { url } : {}),
+            filename: `variant-${r.id.slice(0, 6)}.webm`,
+          };
+        }),
+
       );
     },
   });
