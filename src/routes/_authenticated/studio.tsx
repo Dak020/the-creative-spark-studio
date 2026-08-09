@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HOOK_CATEGORIES } from "@/lib/constants";
+import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, signedUrl } from "@/lib/db";
 import { planStartOffsets, renderVariant } from "@/lib/render/browser-render";
+
 
 const CLIP_SECONDS = 8;
 const OUT_W = 1080;
@@ -101,6 +103,38 @@ function StudioPage() {
     },
   });
 
+  // Previously rendered variants, so results survive a page reload.
+  const { data: pastResults } = useQuery({
+    queryKey: ["studio-results"],
+    queryFn: async (): Promise<BatchItem[]> => {
+      const { data } = await supabase
+        .from("generated_videos")
+        .select("id, hook_text, output_url, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(VARIANTS);
+      const rows = data ?? [];
+      return Promise.all(
+        rows.map(async (r): Promise<BatchItem> => {
+          const url = await signedUrl("renders", r.output_url, 60 * 60 * 6);
+          return {
+            jobId: r.id,
+            hookId: "",
+            hookText: r.hook_text ?? "",
+            status: r.status === "completed" ? "completed" : "failed",
+            progress: 100,
+            ...(url ? { url } : {}),
+            filename: `variant-${r.id.slice(0, 6)}.webm`,
+          };
+        }),
+
+      );
+    },
+  });
+
+  const results: BatchItem[] = batch.length > 0 ? batch : (pastResults ?? []);
+
+
+
   const asset = useMemo(
     () => (assets ?? []).find((a) => a.id === assetId) ?? (assets ?? [])[0] ?? null,
     [assets, assetId],
@@ -123,22 +157,30 @@ function StudioPage() {
 
   const onUpload = useCallback(
     async (file: File) => {
-      if (!user) return;
-      if (!/\.(mp4|mov|m4v)$/i.test(file.name)) {
-        toast.error("Upload an MP4 or MOV file.");
+      if (!user) {
+        toast.error("You are signed out — sign in again to upload.");
+        return;
+      }
+      const invalid = videoFileError(file);
+      if (invalid) {
+        toast.error(invalid);
         return;
       }
       setUploading(true);
       try {
         const projectId = await ensureStudioProject(user.id);
         if (!projectId) throw new Error("Could not prepare the studio project.");
-        const meta = await probeVideo(file);
-        const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
+        const meta = await withTimeout(probeVideo(file), 15000, {
+          duration: 0,
+          width: 0,
+          height: 0,
+        });
+        const ext = videoExtension(file);
         const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
         const { error: upErr } = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4", upsert: false });
-        if (upErr) throw new Error(upErr.message);
+        if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
 
         const { data, error } = await supabase
           .from("media_assets")
@@ -146,7 +188,7 @@ function StudioPage() {
             user_id: user.id,
             project_id: projectId,
             storage_path: path,
-            filename: file.name,
+            filename: file.name || `clip.${ext}`,
             duration: meta.duration,
             width: meta.width,
             height: meta.height,
@@ -155,9 +197,9 @@ function StudioPage() {
           })
           .select("id")
           .single();
-        if (error) {
+        if (error || !data) {
           await supabase.storage.from("media").remove([path]);
-          throw new Error(error.message);
+          throw new Error(`Saving the clip failed: ${error?.message ?? "no record returned"}`);
         }
 
         setAssetId(data.id);
@@ -176,6 +218,7 @@ function StudioPage() {
     },
     [qc, user],
   );
+
 
   async function saveHook() {
     if (!user) return;
@@ -362,7 +405,9 @@ function StudioPage() {
     }
 
     setRendering(false);
+    await qc.invalidateQueries({ queryKey: ["studio-results"] });
     toast.success("Batch finished");
+
   }
 
   return (
@@ -554,7 +599,7 @@ function StudioPage() {
       {/* 4. Results */}
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">4. Results</h2>
-        {batch.length === 0 ? (
+        {results.length === 0 ? (
           <EmptyState
             icon={Film}
             title="No variants yet"
@@ -562,7 +607,7 @@ function StudioPage() {
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {batch.map((b, i) => (
+            {results.map((b, i) => (
               <div key={b.jobId} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {b.url ? (
@@ -577,14 +622,17 @@ function StudioPage() {
                 <div className="flex items-center justify-between gap-2">
                   <StatusPill status={b.status} />
                   {b.url ? (
-                    <Button asChild size="sm" variant="secondary">
-                      <a href={b.url} download={b.filename}>
-                        <Download className="size-3.5" />
-                        Download
-                      </a>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void downloadVariant(b.url!, b.filename ?? `variant-${i + 1}.webm`)}
+                    >
+                      <Download className="size-3.5" />
+                      Download
                     </Button>
                   ) : null}
                 </div>
+
                 {b.status !== "completed" && b.status !== "failed" ? (
                   <Progress value={b.progress} className="h-1.5" />
                 ) : null}
@@ -597,6 +645,25 @@ function StudioPage() {
     </div>
   );
 }
+
+async function downloadVariant(url: string, filename: string) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+  } catch (e) {
+    toast.error((e as Error).message);
+  }
+}
+
 
 async function ensureStudioProject(userId: string) {
   const { data: existing } = await supabase
