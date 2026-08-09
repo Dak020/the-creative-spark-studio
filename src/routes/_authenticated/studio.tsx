@@ -405,7 +405,9 @@ function StudioPage() {
     }
 
     setRendering(false);
+    await qc.invalidateQueries({ queryKey: ["studio-results"] });
     toast.success("Batch finished");
+
   }
 
   return (
