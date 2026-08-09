@@ -103,6 +103,33 @@ function StudioPage() {
     },
   });
 
+  // Previously rendered variants, so results survive a page reload.
+  const { data: pastResults } = useQuery({
+    queryKey: ["studio-results"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("generated_videos")
+        .select("id, hook_text, output_url, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(VARIANTS);
+      const rows = data ?? [];
+      return Promise.all(
+        rows.map(async (r) => ({
+          jobId: r.id,
+          hookId: "",
+          hookText: r.hook_text ?? "",
+          status: (r.status === "completed" ? "completed" : "failed") as BatchItem["status"],
+          progress: 100,
+          url: (await signedUrl("renders", r.output_url, 60 * 60 * 6)) ?? undefined,
+          filename: `variant-${r.id.slice(0, 6)}.webm`,
+        })),
+      );
+    },
+  });
+
+  const results = batch.length > 0 ? batch : (pastResults ?? []);
+
+
   const asset = useMemo(
     () => (assets ?? []).find((a) => a.id === assetId) ?? (assets ?? [])[0] ?? null,
     [assets, assetId],
