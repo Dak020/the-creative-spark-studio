@@ -130,6 +130,8 @@ function StudioPage() {
       }
       setUploading(true);
       try {
+        const projectId = await ensureStudioProject(user.id);
+        if (!projectId) throw new Error("Could not prepare the studio project.");
         const meta = await probeVideo(file);
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
         const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
