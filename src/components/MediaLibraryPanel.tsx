@@ -118,6 +118,7 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       const userId = userRes.user?.id;
       if (!userId) throw new Error("Not signed in");
 
+      let created = 0;
       for (const file of Array.from(files)) {
         if (!/\.(mp4|mov|m4v)$/i.test(file.name)) {
           toast.error(`${file.name}: only MP4 and MOV files are supported`);
@@ -165,16 +166,25 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           category: "Other",
           tags: [],
         });
-        if (insErr) throw insErr;
+        if (insErr) {
+          await supabase.storage.from("media").remove([path]);
+          throw insErr;
+        }
+        created += 1;
       }
+      if (created === 0) throw new Error("No clips were uploaded");
+      return created;
     },
-    onSuccess: () => {
-      toast.success("Upload complete");
+    onSuccess: (created) => {
+      toast.success(created === 1 ? "Upload complete" : `${created} clips uploaded`);
       qc.invalidateQueries({ queryKey: ["media"] });
+      qc.invalidateQueries({ queryKey: ["project"] });
+      qc.invalidateQueries({ queryKey: ["studio-assets"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
     onSettled: () => setUploading(false),
   });
+
 
   const remove = useMutation({
     mutationFn: async (asset: MediaAsset) => {
