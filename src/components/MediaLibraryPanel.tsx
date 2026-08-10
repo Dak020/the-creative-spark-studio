@@ -144,15 +144,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   }, [assets, category, query]);
 
   const upload = useMutation({
-    mutationFn: async (files: FileList) => {
+    mutationFn: async (files: File[]) => {
       logUploadDiagnostic(
         "Mutation input",
         files.length > 0 ? "success" : "failure",
-        `FileList contains ${files.length} file(s) when the mutation starts.`,
+        `Stable File[] contains ${files.length} file(s) when the mutation starts.`,
       );
       if (files.length === 0) {
         const error = new Error(
-          "The upload mutation received an empty FileList after the input change event.",
+          "The upload mutation received an empty file array after the input change event.",
         );
         logUploadDiagnostic("Stopping condition", "failure", error.message);
         throw error;
@@ -171,7 +171,7 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
 
       let created = 0;
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const ext = videoExtension(file);
         logUploadDiagnostic("File received", "success", {
           isFile: file instanceof File,
