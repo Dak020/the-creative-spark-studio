@@ -36,6 +36,21 @@ export type MediaAsset = {
   created_at: string;
 };
 
+type UploadDiagnostic = {
+  stage: string;
+  status: "pending" | "success" | "failure" | "info";
+  detail: string;
+};
+
+function diagnosticDetail(value: unknown) {
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 async function probeVideo(file: File) {
   return new Promise<{ duration: number; width: number; height: number; thumb: Blob | null }>(
     (resolve) => {
@@ -91,6 +106,20 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [editing, setEditing] = useState<MediaAsset | null>(null);
   const [editCategory, setEditCategory] = useState("Other");
   const [editTags, setEditTags] = useState("");
+  const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
+
+  function logUploadDiagnostic(
+    stage: string,
+    status: UploadDiagnostic["status"],
+    detail: unknown,
+  ) {
+    const renderedDetail = typeof detail === "string" ? detail : diagnosticDetail(detail);
+    console.log(`[Studio upload] ${stage}: ${status}`, detail);
+    setUploadDiagnostics((current) => [
+      ...current.filter((entry) => entry.stage !== stage),
+      { stage, status, detail: renderedDetail },
+    ]);
+  }
 
   const { data: assets, isLoading } = useQuery({
     queryKey: ["media", projectId ?? "all"],
@@ -116,19 +145,50 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
 
   const upload = useMutation({
     mutationFn: async (files: FileList) => {
+      logUploadDiagnostic(
+        "Mutation input",
+        files.length > 0 ? "success" : "failure",
+        `FileList contains ${files.length} file(s) when the mutation starts.`,
+      );
+      if (files.length === 0) {
+        const error = new Error(
+          "The upload mutation received an empty FileList after the input change event.",
+        );
+        logUploadDiagnostic("Stopping condition", "failure", error.message);
+        throw error;
+      }
+
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      logUploadDiagnostic("Authentication", userErr ? "failure" : "success", {
+        userId: userRes.user?.id ?? null,
+        error: userErr,
+      });
       if (userErr) throw new Error(`Auth check failed: ${userErr.message}`);
       const userId = userRes.user?.id;
       if (!userId) throw new Error("You are signed out — sign in again to upload.");
+      logUploadDiagnostic("Authenticated user ID", "info", userId);
+      logUploadDiagnostic("Project ID", projectId ? "success" : "failure", projectId ?? "null");
 
       let created = 0;
-      const problems: string[] = [];
 
       for (const file of Array.from(files)) {
+        const ext = videoExtension(file);
+        logUploadDiagnostic("File received", "success", {
+          isFile: file instanceof File,
+          name: file.name,
+          mimeType: file.type || "(empty)",
+          size: file.size,
+          extension: ext,
+        });
         const invalid = videoFileError(file);
+        logUploadDiagnostic(
+          "Validation",
+          invalid ? "failure" : "success",
+          invalid ?? "Accepted by MIME type and/or extension; file is non-empty and within the size limit.",
+        );
         if (invalid) {
-          problems.push(invalid);
-          continue;
+          logUploadDiagnostic("Stopping condition", "failure", `Validation rejected the file: ${invalid}`);
+          throw new Error(invalid);
         }
 
         const meta = await withTimeout(probeVideo(file), 15000, {
@@ -137,13 +197,25 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           height: 0,
           thumb: null,
         });
+        logUploadDiagnostic(
+          "Video metadata",
+          meta.duration > 0 && meta.width > 0 && meta.height > 0 ? "success" : "failure",
+          meta,
+        );
         const id = crypto.randomUUID();
-        const ext = videoExtension(file);
         const path = `${userId}/${id}.${ext}`;
 
-        const { error: upErr } = await supabase.storage
+        logUploadDiagnostic("Before storage upload", "pending", {
+          bucket: "media",
+          path,
+          contentType: file.type || "video/mp4",
+          size: file.size,
+        });
+        const storageResult = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4" });
+        const { error: upErr } = storageResult;
+        logUploadDiagnostic("Storage upload result", upErr ? "failure" : "success", storageResult);
         if (upErr) throw new Error(`Storage upload failed for ${file.name}: ${upErr.message}`);
 
         let thumbnailUrl: string | null = null;
@@ -160,23 +232,32 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           }
         }
 
-        const { data: inserted, error: insErr } = await supabase
+        const insertPayload = {
+          user_id: userId,
+          project_id: projectId ?? null,
+          storage_path: path,
+          thumbnail_url: thumbnailUrl,
+          filename: file.name || `clip.${ext}`,
+          duration: meta.duration,
+          width: meta.width,
+          height: meta.height,
+          size_bytes: file.size,
+          category: "Other",
+          tags: [],
+        };
+        logUploadDiagnostic("Before database insert", "pending", insertPayload);
+        const insertResult = await supabase
           .from("media_assets")
-          .insert({
-            user_id: userId,
-            project_id: projectId ?? null,
-            storage_path: path,
-            thumbnail_url: thumbnailUrl,
-            filename: file.name || `clip.${ext}`,
-            duration: meta.duration,
-            width: meta.width,
-            height: meta.height,
-            size_bytes: file.size,
-            category: "Other",
-            tags: [],
-          })
-          .select("id")
+          .insert(insertPayload)
+          .select("*")
           .single();
+        const { data: inserted, error: insErr } = insertResult;
+        logUploadDiagnostic("Database insert result", insErr ? "failure" : "success", insertResult);
+        logUploadDiagnostic(
+          "Returned media record",
+          inserted ? "success" : "failure",
+          inserted ?? "No media record was returned.",
+        );
         if (insErr || !inserted) {
           await supabase.storage.from("media").remove([path]);
           throw new Error(`Saving ${file.name} failed: ${insErr?.message ?? "no record returned"}`);
@@ -184,8 +265,26 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
         created += 1;
       }
       if (created === 0) {
-        throw new Error(problems.join(" ") || "No clips were uploaded.");
+        const error = new Error(
+          "Upload stopped because zero media records were created. See the stopping condition above.",
+        );
+        logUploadDiagnostic("Stopping condition", "failure", error.message);
+        throw error;
       }
+
+      const finalQuery = projectId
+        ? await supabase
+            .from("media_assets")
+            .select("*")
+            .eq("project_id", projectId)
+            .order("created_at", { ascending: false })
+        : await supabase.from("media_assets").select("*").order("created_at", { ascending: false });
+      logUploadDiagnostic(
+        "Final media query",
+        finalQuery.error ? "failure" : "success",
+        finalQuery,
+      );
+      if (finalQuery.error) throw new Error(`Final media query failed: ${finalQuery.error.message}`);
       return created;
     },
 
@@ -195,7 +294,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       qc.invalidateQueries({ queryKey: ["project"] });
       qc.invalidateQueries({ queryKey: ["studio-assets"] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
+    onError: (e) => {
+      const error = e instanceof Error ? e : new Error(diagnosticDetail(e));
+      logUploadDiagnostic("Upload error", "failure", error);
+      toast.error(error.message);
+    },
     onSettled: () => setUploading(false),
   });
 
@@ -272,9 +375,29 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           multiple
           className="hidden"
           onChange={(e) => {
-            if (e.target.files?.length) {
+            const files = e.target.files;
+            setUploadDiagnostics([]);
+            console.log("[Studio upload] File input change event", {
+              receivedFileList: Boolean(files),
+              fileCount: files?.length ?? 0,
+              firstFile: files?.[0] ?? null,
+            });
+            logUploadDiagnostic(
+              "File input change event",
+              files?.[0] ? "success" : "failure",
+              files?.[0]
+                ? {
+                    receivedFile: true,
+                    name: files[0].name,
+                    mimeType: files[0].type || "(empty)",
+                    size: files[0].size,
+                    extension: videoExtension(files[0]),
+                  }
+                : { receivedFile: false, fileCount: files?.length ?? 0 },
+            );
+            if (files?.length) {
               setUploading(true);
-              upload.mutate(e.target.files);
+              upload.mutate(files);
             }
             e.target.value = "";
           }}
@@ -284,6 +407,27 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           Upload clips
         </Button>
       </div>
+
+      {uploadDiagnostics.length > 0 ? (
+        <div className="panel border-border p-4" role="status" aria-live="polite">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-xs font-semibold">Upload diagnostics</h3>
+            <span className="font-mono text-[10px] text-muted-foreground">temporary developer panel</span>
+          </div>
+          <dl className="space-y-2 font-mono text-[11px]">
+            {uploadDiagnostics.map((entry) => (
+              <div key={entry.stage} className="grid gap-1 border-t border-border pt-2 sm:grid-cols-[180px_1fr]">
+                <dt className="font-medium">
+                  {entry.stage}: {entry.status === "success" ? "✓" : entry.status === "failure" ? "✗" : "…"}
+                </dt>
+                <dd className={entry.status === "failure" ? "whitespace-pre-wrap text-destructive" : "whitespace-pre-wrap text-muted-foreground"}>
+                  {entry.detail}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="panel flex items-center justify-center py-20">
