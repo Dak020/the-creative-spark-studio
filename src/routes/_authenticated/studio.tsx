@@ -434,7 +434,10 @@ function StudioPage() {
             accept="video/mp4,video/quicktime,.mp4,.mov"
             hidden
             onChange={(e) => {
-              const f = e.target.files?.[0];
+              const input = e.currentTarget;
+              const files = Array.from(input.files ?? []);
+              input.value = "";
+              const f = files[0];
               if (f) void onUpload(f);
             }}
           />

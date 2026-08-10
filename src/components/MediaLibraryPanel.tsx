@@ -144,15 +144,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   }, [assets, category, query]);
 
   const upload = useMutation({
-    mutationFn: async (files: FileList) => {
+    mutationFn: async (files: File[]) => {
       logUploadDiagnostic(
         "Mutation input",
         files.length > 0 ? "success" : "failure",
-        `FileList contains ${files.length} file(s) when the mutation starts.`,
+        `Stable File[] contains ${files.length} file(s) when the mutation starts.`,
       );
       if (files.length === 0) {
         const error = new Error(
-          "The upload mutation received an empty FileList after the input change event.",
+          "The upload mutation received an empty file array after the input change event.",
         );
         logUploadDiagnostic("Stopping condition", "failure", error.message);
         throw error;
@@ -171,7 +171,7 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
 
       let created = 0;
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const ext = videoExtension(file);
         logUploadDiagnostic("File received", "success", {
           isFile: file instanceof File,
@@ -375,17 +375,18 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           multiple
           className="hidden"
           onChange={(e) => {
-            const files = e.target.files;
+            const input = e.currentTarget;
+            const files = Array.from(input.files ?? []);
+            input.value = "";
             setUploadDiagnostics([]);
             console.log("[Studio upload] File input change event", {
-              receivedFileList: Boolean(files),
-              fileCount: files?.length ?? 0,
-              firstFile: files?.[0] ?? null,
+              fileCount: files.length,
+              firstFile: files[0] ?? null,
             });
             logUploadDiagnostic(
               "File input change event",
-              files?.[0] ? "success" : "failure",
-              files?.[0]
+              files[0] ? "success" : "failure",
+              files[0]
                 ? {
                     receivedFile: true,
                     name: files[0].name,
@@ -393,13 +394,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                     size: files[0].size,
                     extension: videoExtension(files[0]),
                   }
-                : { receivedFile: false, fileCount: files?.length ?? 0 },
+                : { receivedFile: false, fileCount: files.length },
             );
-            if (files?.length) {
+            if (files.length) {
               setUploading(true);
               upload.mutate(files);
             }
-            e.target.value = "";
           }}
         />
         <Button onClick={() => inputRef.current?.click()} disabled={uploading}>
