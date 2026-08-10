@@ -375,17 +375,18 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           multiple
           className="hidden"
           onChange={(e) => {
-            const files = e.target.files;
+            const input = e.currentTarget;
+            const files = Array.from(input.files ?? []);
+            input.value = "";
             setUploadDiagnostics([]);
             console.log("[Studio upload] File input change event", {
-              receivedFileList: Boolean(files),
-              fileCount: files?.length ?? 0,
-              firstFile: files?.[0] ?? null,
+              fileCount: files.length,
+              firstFile: files[0] ?? null,
             });
             logUploadDiagnostic(
               "File input change event",
-              files?.[0] ? "success" : "failure",
-              files?.[0]
+              files[0] ? "success" : "failure",
+              files[0]
                 ? {
                     receivedFile: true,
                     name: files[0].name,
@@ -393,13 +394,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                     size: files[0].size,
                     extension: videoExtension(files[0]),
                   }
-                : { receivedFile: false, fileCount: files?.length ?? 0 },
+                : { receivedFile: false, fileCount: files.length },
             );
-            if (files?.length) {
+            if (files.length) {
               setUploading(true);
               upload.mutate(files);
             }
-            e.target.value = "";
           }}
         />
         <Button onClick={() => inputRef.current?.click()} disabled={uploading}>
