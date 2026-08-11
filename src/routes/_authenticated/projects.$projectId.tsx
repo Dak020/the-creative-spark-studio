@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Play, Sparkles, Trophy } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Play, Sparkles, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { createBatchFn, processQueueFn } from "@/lib/render.functions";
 import { MediaLibraryPanel } from "@/components/MediaLibraryPanel";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fmtDate, audienceSummary } from "@/lib/db";
+import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 import { platformLabel, styleLabel } from "@/lib/constants";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
@@ -55,11 +56,17 @@ function ProjectWorkspace() {
         supabase.from("hooks").select("id").eq("project_id", projectId),
         supabase.from("media_assets").select("id").eq("project_id", projectId),
       ]);
+      const videoRows = await Promise.all(
+        (videos.data ?? []).map(async (v) => ({
+          ...v,
+          playbackUrl: await resolveRenderUrl(v.output_url),
+        })),
+      );
       return {
         project: project.data,
         product: product.data,
         jobs: jobs.data ?? [],
-        videos: videos.data ?? [],
+        videos: videoRows,
         hookCount: (hooks.data ?? []).length,
         mediaCount: (media.data ?? []).length,
       };
@@ -205,12 +212,44 @@ function ProjectWorkspace() {
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {data?.videos.map((v) => (
-              <div key={v.id} className="panel p-4">
+              <div key={v.id} className="panel space-y-3 p-4">
+                <div className="overflow-hidden rounded-lg border border-border bg-black">
+                  {v.playbackUrl ? (
+                    <video
+                      src={v.playbackUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="aspect-[9/16] w-full"
+                    />
+                  ) : (
+                    <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                      Output file missing — re-run this render.
+                    </div>
+                  )}
+                </div>
                 <p className="line-clamp-2 text-sm font-medium">{v.hook_text ?? "Untitled"}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {fmtDate(v.created_at)}
-                  {v.is_winner ? " · Winner" : ""}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {fmtDate(v.created_at)}
+                    {v.is_winner ? " · Winner" : ""}
+                  </p>
+                  {v.playbackUrl ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        void downloadRender(
+                          v.playbackUrl!,
+                          renderFilename(v.output_url, `hook-variant-${v.id.slice(0, 6)}`),
+                        ).catch((e) => toast.error((e as Error).message))
+                      }
+                    >
+                      <Download className="size-3.5" />
+                      Download
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

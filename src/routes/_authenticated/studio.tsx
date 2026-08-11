@@ -355,6 +355,8 @@ function StudioPage() {
           onProgress: (pct) => patch({ progress: Math.max(5, pct) }),
         });
 
+        if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");
+
         const outPath = `${user.id}/${item.jobId}.${extension}`;
         const { error: upErr } = await supabase.storage
           .from("renders")
