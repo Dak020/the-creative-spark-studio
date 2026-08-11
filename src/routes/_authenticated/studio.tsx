@@ -389,7 +389,7 @@ function StudioPage() {
           status: "completed",
           progress: 100,
           url,
-          filename: `variant-${i + 1}.${extension}`,
+          filename: `hook-variant-${i + 1}.${extension}`,
         });
       } catch (e) {
         const message = (e as Error).message;
@@ -630,7 +630,11 @@ function StudioPage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => void downloadVariant(b.url!, b.filename ?? `variant-${i + 1}.webm`)}
+                      onClick={() =>
+                        void downloadRender(b.url!, b.filename ?? `hook-variant-${i + 1}.mp4`).catch((e) =>
+                          toast.error((e as Error).message),
+                        )
+                      }
                     >
                       <Download className="size-3.5" />
                       Download
@@ -650,25 +654,6 @@ function StudioPage() {
     </div>
   );
 }
-
-async function downloadVariant(url: string, filename: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
-  } catch (e) {
-    toast.error((e as Error).message);
-  }
-}
-
 
 async function ensureStudioProject(userId: string) {
   const { data: existing } = await supabase
