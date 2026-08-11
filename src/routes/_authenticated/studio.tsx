@@ -24,12 +24,14 @@ import { HOOK_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, signedUrl } from "@/lib/db";
 import { planStartOffsets, renderVariant } from "@/lib/render/browser-render";
+import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 
 
 const CLIP_SECONDS = 8;
 const OUT_W = 1080;
 const OUT_H = 1920;
-const VARIANTS = 5;
+const MAX_VARIANTS = 5;
+
 
 export const Route = createFileRoute("/_authenticated/studio")({
   head: () => ({
