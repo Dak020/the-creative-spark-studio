@@ -112,13 +112,27 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     recorder.onstop = () => resolve();
   });
 
-  const font = `700 ${fontSize}px "Inter", system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const boxPadX = Math.round(fontSize * 0.42);
-  const boxPadY = Math.round(fontSize * 0.26);
-  const lineHeight = Math.round(fontSize * 1.32);
+  // Reference overlay: solid white boxes hugging each line, heavy black type,
+  // placed inside the TikTok/Reels safe area under the top UI.
+  const font = `800 ${fontSize}px "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif`;
+  const boxPadX = Math.round(fontSize * 0.34);
+  const boxPadY = Math.round(fontSize * 0.30);
+  const lineGap = Math.round(fontSize * 0.14);
+  const radius = Math.round(fontSize * 0.10);
   ctx.font = font;
-  const lines = wrapLines(ctx, text, width * 0.82);
-  const blockTop = Math.round(height * 0.14);
+  const lines = wrapLines(ctx, text, width * 0.78);
+  const blockTop = Math.round(height * 0.17);
+
+  function roundRect(x: number, y: number, w: number, h: number, r: number) {
+    ctx!.beginPath();
+    ctx!.moveTo(x + r, y);
+    ctx!.arcTo(x + w, y, x + w, y + h, r);
+    ctx!.arcTo(x + w, y + h, x, y + h, r);
+    ctx!.arcTo(x, y + h, x, y, r);
+    ctx!.arcTo(x, y, x + w, y, r);
+    ctx!.closePath();
+    ctx!.fill();
+  }
 
   function drawFrame() {
     ctx!.fillStyle = "#000000";
@@ -134,15 +148,15 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     ctx!.font = font;
     ctx!.textBaseline = "middle";
     ctx!.textAlign = "center";
+    const boxH = Math.round(fontSize + boxPadY * 2);
     lines.forEach((line, i) => {
       const metrics = ctx!.measureText(line);
-      const boxW = metrics.width + boxPadX * 2;
-      const boxH = lineHeight + boxPadY;
-      const y = blockTop + i * (boxH + 8);
+      const boxW = Math.round(metrics.width + boxPadX * 2);
+      const y = blockTop + i * (boxH + lineGap);
       ctx!.fillStyle = "#FFFFFF";
-      ctx!.fillRect((width - boxW) / 2, y, boxW, boxH);
+      roundRect(Math.round((width - boxW) / 2), y, boxW, boxH, radius);
       ctx!.fillStyle = "#000000";
-      ctx!.fillText(line, width / 2, y + boxH / 2);
+      ctx!.fillText(line, width / 2, y + boxH / 2 + 1);
     });
   }
 
@@ -153,11 +167,15 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const startedAt = performance.now();
   await new Promise<void>((resolve) => {
     const tick = () => {
+      // When the source runs out we keep drawing its final frame so the export
+      // is always exactly `durationSeconds` long.
+      if (video.ended || video.currentTime >= start + durationSeconds - 0.03) {
+        if (!video.paused) video.pause();
+      }
       drawFrame();
       const elapsed = (performance.now() - startedAt) / 1000;
       opts.onProgress?.(Math.min(99, Math.round((elapsed / durationSeconds) * 100)));
-      const reachedEnd = video.ended || video.currentTime >= start + durationSeconds - 0.03;
-      if (elapsed >= durationSeconds || reachedEnd) {
+      if (elapsed >= durationSeconds) {
         resolve();
         return;
       }
@@ -165,6 +183,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     };
     requestAnimationFrame(tick);
   });
+
 
   video.pause();
   recorder.stop();
