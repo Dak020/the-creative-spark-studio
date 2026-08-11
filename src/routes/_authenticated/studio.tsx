@@ -229,8 +229,10 @@ function StudioPage() {
       return;
     }
     setSavingHook(true);
+    const projectId = await ensureStudioProject(user.id);
     const { error } = await supabase.from("hooks").insert({
       user_id: user.id,
+      project_id: projectId,
       text: text.trim(),
       category,
       notes: notes.trim() || null,

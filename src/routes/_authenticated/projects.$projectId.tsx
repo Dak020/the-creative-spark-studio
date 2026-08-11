@@ -159,7 +159,11 @@ function ProjectWorkspace() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Hooks" value={data?.hookCount ?? 0} icon={Sparkles} accent />
         <StatCard label="Clips" value={data?.mediaCount ?? 0} icon={Play} />
-        <StatCard label="Videos" value={data?.videos.length ?? 0} icon={Trophy} />
+        <StatCard
+          label="Videos"
+          value={(data?.videos ?? []).filter((v) => v.playbackUrl).length}
+          icon={Trophy}
+        />
         <StatCard
           label="Queue"
           value={(data?.jobs ?? []).filter((j) => j.status === "queued" || j.status === "processing").length}
