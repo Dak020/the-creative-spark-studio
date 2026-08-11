@@ -24,12 +24,14 @@ import { HOOK_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, signedUrl } from "@/lib/db";
 import { planStartOffsets, renderVariant } from "@/lib/render/browser-render";
+import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 
 
 const CLIP_SECONDS = 8;
 const OUT_W = 1080;
 const OUT_H = 1920;
-const VARIANTS = 5;
+const MAX_VARIANTS = 5;
+
 
 export const Route = createFileRoute("/_authenticated/studio")({
   head: () => ({
@@ -109,27 +111,27 @@ function StudioPage() {
     queryFn: async (): Promise<BatchItem[]> => {
       const { data } = await supabase
         .from("generated_videos")
-        .select("id, hook_text, output_url, status, created_at")
+        .select("id, hook_id, hook_text, output_url, status, created_at")
         .order("created_at", { ascending: false })
-        .limit(VARIANTS);
+        .limit(MAX_VARIANTS);
       const rows = data ?? [];
       return Promise.all(
         rows.map(async (r): Promise<BatchItem> => {
-          const url = await signedUrl("renders", r.output_url, 60 * 60 * 6);
+          const url = await resolveRenderUrl(r.output_url);
           return {
             jobId: r.id,
-            hookId: "",
+            hookId: r.hook_id ?? "",
             hookText: r.hook_text ?? "",
-            status: r.status === "completed" ? "completed" : "failed",
+            status: url && r.status === "completed" ? "completed" : "failed",
             progress: 100,
-            ...(url ? { url } : {}),
-            filename: `variant-${r.id.slice(0, 6)}.webm`,
+            ...(url ? { url } : { error: "Output file is missing from storage." }),
+            filename: renderFilename(r.output_url, `hook-variant-${r.id.slice(0, 6)}`),
           };
         }),
-
       );
     },
   });
+
 
   const results: BatchItem[] = batch.length > 0 ? batch : (pastResults ?? []);
 
@@ -227,8 +229,10 @@ function StudioPage() {
       return;
     }
     setSavingHook(true);
+    const projectId = await ensureStudioProject(user.id);
     const { error } = await supabase.from("hooks").insert({
       user_id: user.id,
+      project_id: projectId,
       text: text.trim(),
       category,
       notes: notes.trim() || null,
@@ -248,8 +252,8 @@ function StudioPage() {
   function toggleHook(id: string) {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((h) => h !== id);
-      if (prev.length >= VARIANTS) {
-        toast.info(`Select exactly ${VARIANTS} hooks.`);
+      if (prev.length >= MAX_VARIANTS) {
+        toast.info(`You can select up to ${MAX_VARIANTS} hooks.`);
         return prev;
       }
       return [...prev, id];
@@ -261,8 +265,8 @@ function StudioPage() {
       toast.error("Upload a source video first.");
       return;
     }
-    if (selected.length !== VARIANTS) {
-      toast.error(`Select exactly ${VARIANTS} hooks.`);
+    if (selected.length === 0) {
+      toast.error("Select at least one hook.");
       return;
     }
     const chosen = selected
@@ -276,7 +280,7 @@ function StudioPage() {
     }
 
     setRendering(true);
-    const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), VARIANTS, CLIP_SECONDS);
+    const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), chosen.length, CLIP_SECONDS);
     const items: BatchItem[] = [];
 
     try {
@@ -353,6 +357,8 @@ function StudioPage() {
           onProgress: (pct) => patch({ progress: Math.max(5, pct) }),
         });
 
+        if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");
+
         const outPath = `${user.id}/${item.jobId}.${extension}`;
         const { error: upErr } = await supabase.storage
           .from("renders")
@@ -387,7 +393,7 @@ function StudioPage() {
           status: "completed",
           progress: 100,
           url,
-          filename: `variant-${i + 1}.${extension}`,
+          filename: `hook-variant-${i + 1}.${extension}`,
         });
       } catch (e) {
         const message = (e as Error).message;
@@ -414,7 +420,7 @@ function StudioPage() {
     <div className="space-y-8">
       <PageHeader
         title="Studio"
-        description={`Upload one clip, pick ${VARIANTS} winning hooks, render ${VARIANTS} ready-to-post 8s vertical videos.`}
+        description={`Upload one clip, select up to ${MAX_VARIANTS} hooks, render ready-to-post 8s vertical videos.`}
       />
 
       {/* 1. Source video */}
@@ -489,7 +495,7 @@ function StudioPage() {
       <section className="panel p-5">
         <h2 className="text-sm font-semibold">2. Hook library</h2>
         <p className="text-xs text-muted-foreground">
-          Save your winning openings, then select exactly {VARIANTS} for this batch.
+          Save your winning openings, then select up to {MAX_VARIANTS} for this batch.
         </p>
 
         <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -547,7 +553,7 @@ function StudioPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                {selected.length}/{VARIANTS} selected
+                {selected.length}/{MAX_VARIANTS} selected
               </p>
             </div>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
@@ -592,10 +598,10 @@ function StudioPage() {
         </div>
         <Button
           onClick={() => void createVariants()}
-          disabled={rendering || selected.length !== VARIANTS || !asset}
+          disabled={rendering || selected.length === 0 || !asset}
         >
           {rendering ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-          Create {VARIANTS} Variants
+          Render {selected.length || 1} variant{selected.length === 1 ? "" : "s"}
         </Button>
       </section>
 
@@ -606,7 +612,7 @@ function StudioPage() {
           <EmptyState
             icon={Film}
             title="No variants yet"
-            description={`Upload a clip, select ${VARIANTS} hooks and run the batch.`}
+            description={`Upload a clip, select up to ${MAX_VARIANTS} hooks and run the batch.`}
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -628,7 +634,11 @@ function StudioPage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => void downloadVariant(b.url!, b.filename ?? `variant-${i + 1}.webm`)}
+                      onClick={() =>
+                        void downloadRender(b.url!, b.filename ?? `hook-variant-${i + 1}.mp4`).catch((e) =>
+                          toast.error((e as Error).message),
+                        )
+                      }
                     >
                       <Download className="size-3.5" />
                       Download
@@ -648,25 +658,6 @@ function StudioPage() {
     </div>
   );
 }
-
-async function downloadVariant(url: string, filename: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
-  } catch (e) {
-    toast.error((e as Error).message);
-  }
-}
-
 
 async function ensureStudioProject(userId: string) {
   const { data: existing } = await supabase
