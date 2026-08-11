@@ -111,27 +111,27 @@ function StudioPage() {
     queryFn: async (): Promise<BatchItem[]> => {
       const { data } = await supabase
         .from("generated_videos")
-        .select("id, hook_text, output_url, status, created_at")
+        .select("id, hook_id, hook_text, output_url, status, created_at")
         .order("created_at", { ascending: false })
         .limit(MAX_VARIANTS);
       const rows = data ?? [];
       return Promise.all(
         rows.map(async (r): Promise<BatchItem> => {
-          const url = await signedUrl("renders", r.output_url, 60 * 60 * 6);
+          const url = await resolveRenderUrl(r.output_url);
           return {
             jobId: r.id,
-            hookId: "",
+            hookId: r.hook_id ?? "",
             hookText: r.hook_text ?? "",
-            status: r.status === "completed" ? "completed" : "failed",
+            status: url && r.status === "completed" ? "completed" : "failed",
             progress: 100,
-            ...(url ? { url } : {}),
-            filename: `variant-${r.id.slice(0, 6)}.webm`,
+            ...(url ? { url } : { error: "Output file is missing from storage." }),
+            filename: renderFilename(r.output_url, `hook-variant-${r.id.slice(0, 6)}`),
           };
         }),
-
       );
     },
   });
+
 
   const results: BatchItem[] = batch.length > 0 ? batch : (pastResults ?? []);
 
