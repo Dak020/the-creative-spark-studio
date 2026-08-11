@@ -113,7 +113,7 @@ function StudioPage() {
         .from("generated_videos")
         .select("id, hook_text, output_url, status, created_at")
         .order("created_at", { ascending: false })
-        .limit(VARIANTS);
+        .limit(MAX_VARIANTS);
       const rows = data ?? [];
       return Promise.all(
         rows.map(async (r): Promise<BatchItem> => {
@@ -250,8 +250,8 @@ function StudioPage() {
   function toggleHook(id: string) {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((h) => h !== id);
-      if (prev.length >= VARIANTS) {
-        toast.info(`Select exactly ${VARIANTS} hooks.`);
+      if (prev.length >= MAX_VARIANTS) {
+        toast.info(`You can select up to ${MAX_VARIANTS} hooks.`);
         return prev;
       }
       return [...prev, id];
@@ -263,8 +263,8 @@ function StudioPage() {
       toast.error("Upload a source video first.");
       return;
     }
-    if (selected.length !== VARIANTS) {
-      toast.error(`Select exactly ${VARIANTS} hooks.`);
+    if (selected.length === 0) {
+      toast.error("Select at least one hook.");
       return;
     }
     const chosen = selected
@@ -278,7 +278,7 @@ function StudioPage() {
     }
 
     setRendering(true);
-    const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), VARIANTS, CLIP_SECONDS);
+    const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), chosen.length, CLIP_SECONDS);
     const items: BatchItem[] = [];
 
     try {
@@ -416,7 +416,7 @@ function StudioPage() {
     <div className="space-y-8">
       <PageHeader
         title="Studio"
-        description={`Upload one clip, pick ${VARIANTS} winning hooks, render ${VARIANTS} ready-to-post 8s vertical videos.`}
+        description={`Upload one clip, select up to ${MAX_VARIANTS} hooks, render ready-to-post 8s vertical videos.`}
       />
 
       {/* 1. Source video */}
@@ -491,7 +491,7 @@ function StudioPage() {
       <section className="panel p-5">
         <h2 className="text-sm font-semibold">2. Hook library</h2>
         <p className="text-xs text-muted-foreground">
-          Save your winning openings, then select exactly {VARIANTS} for this batch.
+          Save your winning openings, then select up to {MAX_VARIANTS} for this batch.
         </p>
 
         <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -549,7 +549,7 @@ function StudioPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                {selected.length}/{VARIANTS} selected
+                {selected.length}/{MAX_VARIANTS} selected
               </p>
             </div>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
@@ -594,10 +594,10 @@ function StudioPage() {
         </div>
         <Button
           onClick={() => void createVariants()}
-          disabled={rendering || selected.length !== VARIANTS || !asset}
+          disabled={rendering || selected.length === 0 || !asset}
         >
           {rendering ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-          Create {VARIANTS} Variants
+          Render {selected.length || 1} variant{selected.length === 1 ? "" : "s"}
         </Button>
       </section>
 
@@ -608,7 +608,7 @@ function StudioPage() {
           <EmptyState
             icon={Film}
             title="No variants yet"
-            description={`Upload a clip, select ${VARIANTS} hooks and run the batch.`}
+            description={`Upload a clip, select up to ${MAX_VARIANTS} hooks and run the batch.`}
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
