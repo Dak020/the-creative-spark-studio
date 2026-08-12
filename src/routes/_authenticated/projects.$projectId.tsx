@@ -1,20 +1,31 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Download, Loader2, Play, Sparkles, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { createBatchFn, processQueueFn } from "@/lib/render.functions";
+import { useAuth } from "@/hooks/useAuth";
 import { MediaLibraryPanel } from "@/components/MediaLibraryPanel";
 import { HookLibraryPanel } from "@/components/HookLibraryPanel";
 import { EmptyState, PageHeader, StatCard, StatusPill } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fmtDate, audienceSummary } from "@/lib/db";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { fmtDate, audienceSummary, signedUrl } from "@/lib/db";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
+import { CLIP_SECONDS, STAGE_LABEL, runBatch, type BatchItem } from "@/lib/render/pipeline";
+import { deleteRender } from "@/lib/render/delete";
+import { DeleteRenderButton } from "@/routes/_authenticated/studio";
 import { platformLabel, styleLabel } from "@/lib/constants";
+
+const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   head: () => ({
@@ -30,14 +41,15 @@ export const Route = createFileRoute("/_authenticated/projects/$projectId")({
 
 function ProjectWorkspace() {
   const { projectId } = Route.useParams();
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
-  const createBatch = useServerFn(createBatchFn);
-  const processQueue = useServerFn(processQueueFn);
+  const [quantity, setQuantity] = useState("5");
+  const [live, setLive] = useState<BatchItem[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["project", projectId],
-    refetchInterval: 8000,
+    refetchInterval: running ? false : 8000,
     queryFn: async () => {
       const [project, product, jobs, videos, hooks, media] = await Promise.all([
         supabase.from("projects").select("*").eq("id", projectId).maybeSingle(),
@@ -50,11 +62,15 @@ function ProjectWorkspace() {
           .limit(20),
         supabase
           .from("generated_videos")
-          .select("*")
+          .select("*, media_assets(filename)")
           .eq("project_id", projectId)
           .order("created_at", { ascending: false }),
-        supabase.from("hooks").select("id").eq("project_id", projectId),
-        supabase.from("media_assets").select("id").eq("project_id", projectId),
+        supabase.from("hooks").select("id, text").eq("project_id", projectId),
+        supabase
+          .from("media_assets")
+          .select("id, filename, duration, storage_path")
+          .eq("project_id", projectId)
+          .order("created_at", { ascending: false }),
       ]);
       const videoRows = await Promise.all(
         (videos.data ?? []).map(async (v) => ({
@@ -67,45 +83,52 @@ function ProjectWorkspace() {
         product: product.data,
         jobs: jobs.data ?? [],
         videos: videoRows,
-        hookCount: (hooks.data ?? []).length,
-        mediaCount: (media.data ?? []).length,
+        hooks: hooks.data ?? [],
+        media: media.data ?? [],
       };
     },
   });
 
-  const batch = useMutation({
-    mutationFn: async () => {
-      const [hooks, media] = await Promise.all([
-        supabase.from("hooks").select("id").eq("project_id", projectId).limit(20),
-        supabase.from("media_assets").select("id").eq("project_id", projectId).limit(20),
-      ]);
-      if (!hooks.data?.length) throw new Error("Add at least one hook to this project first.");
-      if (!media.data?.length) throw new Error("Upload at least one clip to this project first.");
-      return createBatch({
-        data: {
-          projectId,
-          hookIds: hooks.data.map((h) => h.id),
-          mediaAssetIds: media.data.map((m) => m.id),
-          duration: 8,
-          overlayPosition: "top",
-          fontSize: 64,
-          backgroundColor: "#FFFFFF",
-          textColor: "#000000",
-        },
+  async function generateBatch() {
+    if (!user) return;
+    const hooks = data?.hooks ?? [];
+    const asset = (data?.media ?? [])[0];
+    if (hooks.length === 0) {
+      toast.error("Add at least one hook to this project first.");
+      return;
+    }
+    if (!asset) {
+      toast.error("Upload at least one clip to this project first.");
+      return;
+    }
+    const url = await signedUrl("media", asset.storage_path, 60 * 60 * 6);
+    if (!url) {
+      toast.error("The source clip could not be read from storage.");
+      return;
+    }
+    const count = Number(quantity);
+    setRunning(true);
+    setLive([]);
+    try {
+      const items = await runBatch({
+        userId: user.id,
+        projectId,
+        asset,
+        assetUrl: url,
+        hooks: hooks.map((h) => ({ id: h.id, text: h.text })),
+        quantity: count,
+        onUpdate: setLive,
       });
-    },
-    onSuccess: async (res) => {
-      toast.success(`Queued ${res.jobs} render jobs`);
-      setRunning(true);
-      try {
-        await processQueue({ data: { projectId, limit: 10 } });
-      } finally {
-        setRunning(false);
-        qc.invalidateQueries({ queryKey: ["project", projectId] });
-      }
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+      const done = items.filter((i) => i.stage === "completed").length;
+      if (done === items.length) toast.success(`${done} of ${count} variants rendered`);
+      else toast.warning(`${done} of ${count} variants rendered — check the failed jobs`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRunning(false);
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+    }
+  }
 
   if (isLoading) {
     return (
@@ -131,6 +154,10 @@ function ProjectWorkspace() {
     );
   }
 
+  const requested = live.length;
+  const completed = live.filter((l) => l.stage === "completed").length;
+  const failed = live.filter((l) => l.stage === "failed");
+
   return (
     <div className="space-y-8">
       <Link
@@ -145,20 +172,30 @@ function ProjectWorkspace() {
         title={project.name}
         description={`${platformLabel(project.platform)} · ${styleLabel(project.content_style)} · ${audienceSummary(project)}`}
         actions={
-          <Button onClick={() => batch.mutate()} disabled={batch.isPending || running}>
-            {batch.isPending || running ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Play className="size-4" />
-            )}
-            Generate batch
-          </Button>
+          <>
+            <Select value={quantity} onValueChange={setQuantity}>
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {QUANTITY_PRESETS.map((q) => (
+                  <SelectItem key={q} value={String(q)}>
+                    {q} variant{q === 1 ? "" : "s"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={() => void generateBatch()} disabled={running}>
+              {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+              Render {quantity} variant{quantity === "1" ? "" : "s"}
+            </Button>
+          </>
         }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Hooks" value={data?.hookCount ?? 0} icon={Sparkles} accent />
-        <StatCard label="Clips" value={data?.mediaCount ?? 0} icon={Play} />
+        <StatCard label="Hooks" value={(data?.hooks ?? []).length} icon={Sparkles} accent />
+        <StatCard label="Clips" value={(data?.media ?? []).length} icon={Play} />
         <StatCard
           label="Videos"
           value={(data?.videos ?? []).filter((v) => v.playbackUrl).length}
@@ -170,6 +207,32 @@ function ProjectWorkspace() {
           icon={Loader2}
         />
       </div>
+
+      {requested > 0 ? (
+        <div className="panel px-5 py-4 text-xs">
+          <p className="font-medium">
+            {completed} completed / {requested} requested
+          </p>
+          {failed.length > 0 ? (
+            <p className="mt-1 text-destructive">
+              Failed jobs: {failed.map((f) => `${f.jobId.slice(0, 8)} (${f.error ?? "unknown"})`).join(" · ")}
+            </p>
+          ) : null}
+          <div className="mt-3 space-y-2">
+            {live
+              .filter((l) => l.stage !== "completed" && l.stage !== "failed")
+              .map((l) => (
+                <div key={l.jobId} className="space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="line-clamp-1 text-muted-foreground">{l.hookText}</span>
+                    <StatusPill status={STAGE_LABEL[l.stage]} />
+                  </div>
+                  <Progress value={l.progress} className="h-1.5" />
+                </div>
+              ))}
+          </div>
+        </div>
+      ) : null}
 
       <Tabs defaultValue="hooks">
         <TabsList>
@@ -198,9 +261,7 @@ function ProjectWorkspace() {
         <TabsContent value="renders" className="space-y-6 pt-6">
           <div className="panel divide-y divide-border overflow-hidden">
             {(data?.jobs.length ?? 0) === 0 ? (
-              <p className="px-5 py-8 text-center text-xs text-muted-foreground">
-                No render jobs yet.
-              </p>
+              <p className="px-5 py-8 text-center text-xs text-muted-foreground">No render jobs yet.</p>
             ) : (
               data?.jobs.map((j) => (
                 <div key={j.id} className="px-5 py-4">
@@ -209,6 +270,9 @@ function ProjectWorkspace() {
                     <StatusPill status={j.status} />
                   </div>
                   <Progress value={j.progress} className="mt-3 h-1.5" />
+                  {j.error_message ? (
+                    <p className="mt-2 text-[11px] text-destructive">{j.error_message}</p>
+                  ) : null}
                 </div>
               ))
             )}
@@ -233,26 +297,42 @@ function ProjectWorkspace() {
                   )}
                 </div>
                 <p className="line-clamp-2 text-sm font-medium">{v.hook_text ?? "Untitled"}</p>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {(v.media_assets as { filename?: string } | null)?.filename ?? "Source clip"} ·{" "}
+                  {Math.round(Number(v.duration ?? CLIP_SECONDS))}s · {fmtDate(v.created_at)}
+                  {v.is_winner ? " · Winner" : ""}
+                </p>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">
-                    {fmtDate(v.created_at)}
-                    {v.is_winner ? " · Winner" : ""}
-                  </p>
-                  {v.playbackUrl ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void downloadRender(
-                          v.playbackUrl!,
-                          renderFilename(v.output_url, `hook-variant-${v.id.slice(0, 6)}`),
-                        ).catch((e) => toast.error((e as Error).message))
-                      }
-                    >
-                      <Download className="size-3.5" />
-                      Download
-                    </Button>
-                  ) : null}
+                  <StatusPill status={v.playbackUrl ? "completed" : "failed"} />
+                  <div className="flex items-center gap-2">
+                    {v.playbackUrl ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          void downloadRender(
+                            v.playbackUrl!,
+                            renderFilename(v.output_url, `hook-variant-${v.id.slice(0, 6)}`),
+                          ).catch((e) => toast.error((e as Error).message))
+                        }
+                      >
+                        <Download className="size-3.5" />
+                        Download
+                      </Button>
+                    ) : null}
+                    <DeleteRenderButton
+                      onConfirm={async () => {
+                        try {
+                          await deleteRender(v);
+                          await qc.invalidateQueries({ queryKey: ["project", projectId] });
+                          await qc.invalidateQueries({ queryKey: ["studio-results"] });
+                          toast.success("Render deleted");
+                        } catch (e) {
+                          toast.error((e as Error).message);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
