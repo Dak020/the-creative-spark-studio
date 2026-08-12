@@ -1,1 +1,0 @@
-ALTER TABLE public.hooks ADD COLUMN IF NOT EXISTS notes text;
