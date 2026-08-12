@@ -159,5 +159,5 @@ export class PlanOnlyRenderer implements VideoRenderer {
 
 export function getRenderer(): VideoRenderer {
   const ffmpeg = new FfmpegCliRenderer();
-  return ffmpeg.isAvailable() ? ffmpeg : new PreviewRenderer();
+  return ffmpeg.isAvailable() ? ffmpeg : new PlanOnlyRenderer();
 }
