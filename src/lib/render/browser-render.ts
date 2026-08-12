@@ -2,8 +2,11 @@
  * Browser-side deterministic renderer.
  *
  * Draws the source clip into a 1080x1920 canvas (cover crop), burns the hook
- * text into a white box with black type inside the TikTok/Reels safe area, and
- * records exactly `durationSeconds` of output via MediaRecorder.
+ * text into white boxes with heavy black type inside the TikTok/Reels safe
+ * area, and records exactly `durationSeconds` of output via MediaRecorder.
+ *
+ * The overlay is composited into every recorded frame, so the hook is
+ * physically present in the exported file — not drawn by the UI player.
  */
 
 export type BrowserRenderOptions = {
@@ -21,6 +24,7 @@ export type BrowserRenderResult = {
   blob: Blob;
   extension: string;
   mimeType: string;
+  thumbnail: Blob | null;
 };
 
 function pickMimeType(): string {
@@ -37,7 +41,11 @@ function pickMimeType(): string {
   return "video/webm";
 }
 
-function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 4) {
+function fontFor(size: number) {
+  return `800 ${size}px "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif`;
+}
+
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
@@ -51,7 +59,48 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
     }
   }
   if (line) lines.push(line);
-  return lines.slice(0, maxLines);
+  return lines;
+}
+
+/**
+ * Shrink the type until the wrapped hook fits both the horizontal safe width
+ * and the vertical overlay band. Long hooks stay fully visible and never get
+ * cropped or silently truncated.
+ */
+function layoutOverlay(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  width: number,
+  height: number,
+  requestedSize: number,
+) {
+  const maxTextWidth = Math.round(width * 0.78);
+  const maxBandHeight = Math.round(height * 0.46);
+  const minSize = 26;
+  let size = Math.max(minSize, Math.min(requestedSize, Math.round(width * 0.09)));
+  let lines: string[] = [];
+
+  for (;;) {
+    ctx.font = fontFor(size);
+    lines = wrapLines(ctx, text, maxTextWidth);
+    const boxH = size + Math.round(size * 0.3) * 2;
+    const total = lines.length * boxH + (lines.length - 1) * Math.round(size * 0.14);
+    const widest = Math.max(...lines.map((l) => ctx.measureText(l).width), 0);
+    if ((total <= maxBandHeight && widest <= maxTextWidth) || size <= minSize) break;
+    size -= 2;
+  }
+
+  const boxPadX = Math.round(size * 0.34);
+  const boxPadY = Math.round(size * 0.3);
+  const lineGap = Math.round(size * 0.14);
+  const boxH = size + boxPadY * 2;
+  const blockH = lines.length * boxH + (lines.length - 1) * lineGap;
+  // Keep the whole block between the top UI safe area and the caption area.
+  const topSafe = Math.round(height * 0.14);
+  const bottomSafe = Math.round(height * 0.72);
+  const blockTop = Math.min(Math.round(height * 0.17), Math.max(topSafe, bottomSafe - blockH));
+
+  return { size, lines, boxPadX, boxH, lineGap, blockTop, radius: Math.round(size * 0.1) };
 }
 
 function waitFor(el: HTMLVideoElement, event: string) {
@@ -75,7 +124,6 @@ function waitFor(el: HTMLVideoElement, event: string) {
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
   const { sourceUrl, durationSeconds, width, height, text } = opts;
-  const fontSize = opts.fontSize ?? 64;
 
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
@@ -99,6 +147,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas is not available in this browser.");
 
+  const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.fontSize ?? 64);
+  const font = fontFor(overlay.size);
+
   const mimeType = pickMimeType();
   const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
   const stream = canvas.captureStream(30);
@@ -111,17 +162,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const stopped = new Promise<void>((resolve) => {
     recorder.onstop = () => resolve();
   });
-
-  // Reference overlay: solid white boxes hugging each line, heavy black type,
-  // placed inside the TikTok/Reels safe area under the top UI.
-  const font = `800 ${fontSize}px "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif`;
-  const boxPadX = Math.round(fontSize * 0.34);
-  const boxPadY = Math.round(fontSize * 0.30);
-  const lineGap = Math.round(fontSize * 0.14);
-  const radius = Math.round(fontSize * 0.10);
-  ctx.font = font;
-  const lines = wrapLines(ctx, text, width * 0.78);
-  const blockTop = Math.round(height * 0.17);
 
   function roundRect(x: number, y: number, w: number, h: number, r: number) {
     ctx!.beginPath();
@@ -145,18 +185,21 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     const dh = vh * scale;
     ctx!.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh);
 
+    // Burn the hook in on every single frame.
     ctx!.font = font;
     ctx!.textBaseline = "middle";
     ctx!.textAlign = "center";
-    const boxH = Math.round(fontSize + boxPadY * 2);
-    lines.forEach((line, i) => {
+    overlay.lines.forEach((line, i) => {
       const metrics = ctx!.measureText(line);
-      const boxW = Math.round(metrics.width + boxPadX * 2);
-      const y = blockTop + i * (boxH + lineGap);
+      const boxW = Math.min(
+        Math.round(metrics.width + overlay.boxPadX * 2),
+        Math.round(width * 0.92),
+      );
+      const y = overlay.blockTop + i * (overlay.boxH + overlay.lineGap);
       ctx!.fillStyle = "#FFFFFF";
-      roundRect(Math.round((width - boxW) / 2), y, boxW, boxH, radius);
+      roundRect(Math.round((width - boxW) / 2), y, boxW, overlay.boxH, overlay.radius);
       ctx!.fillStyle = "#000000";
-      ctx!.fillText(line, width / 2, y + boxH / 2 + 1);
+      ctx!.fillText(line, width / 2, y + overlay.boxH / 2 + 1);
     });
   }
 
@@ -184,6 +227,14 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     requestAnimationFrame(tick);
   });
 
+  // Poster frame (with the overlay already composited) for the result card.
+  const thumbnail = await new Promise<Blob | null>((resolve) => {
+    try {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.8);
+    } catch {
+      resolve(null);
+    }
+  });
 
   video.pause();
   recorder.stop();
@@ -191,7 +242,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   stream.getTracks().forEach((t) => t.stop());
   video.src = "";
 
-  return { blob: new Blob(chunks, { type: mimeType }), extension, mimeType };
+  const blob = new Blob(chunks, { type: mimeType });
+  if (blob.size === 0) throw new Error("Recorder produced an empty file.");
+  return { blob, extension, mimeType, thumbnail };
 }
 
 /** Evenly spread N start offsets across a source clip, skipping the first beat. */
