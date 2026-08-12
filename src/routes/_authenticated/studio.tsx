@@ -70,7 +70,7 @@ export const Route = createFileRoute("/_authenticated/studio")({
   component: StudioPage,
 });
 
-type ResultCard = BatchItem & { videoId: string | null; thumbnailPath?: string | null };
+type ResultCard = BatchItem & { videoId: string | null };
 
 function StudioPage() {
   const { user } = useAuth();
@@ -158,9 +158,10 @@ function StudioPage() {
             sourceAssetId: r.media_asset_id ?? "",
             durationSeconds: Number(r.duration ?? CLIP_SECONDS),
             createdAt: r.created_at,
+            outputPath: r.output_url,
+            thumbnailPath: r.thumbnail_url,
             stage: ok ? "completed" : "failed",
             progress: 100,
-            thumbnailPath: r.thumbnail_url,
             ...(url ? { url } : { error: "Output file is missing from storage." }),
             filename: renderFilename(r.output_url, `hook-variant-${r.id.slice(0, 6)}`),
           };
@@ -181,6 +182,8 @@ function StudioPage() {
           sourceAssetId: (j.video_recipes as { media_asset_id?: string } | null)?.media_asset_id ?? "",
           durationSeconds: CLIP_SECONDS,
           createdAt: j.created_at,
+          outputPath: null,
+          thumbnailPath: null,
           stage: "failed" as const,
           progress: 100,
           error: j.error_message ?? "Render failed.",
@@ -376,11 +379,11 @@ function StudioPage() {
       if (card.videoId) {
         await deleteRender({
           id: card.videoId,
-          output_url: card.filename ? undefined : null,
-          thumbnail_url: card.thumbnailPath ?? null,
+          output_url: card.outputPath,
+          thumbnail_url: card.thumbnailPath,
           render_job_id: card.jobId,
-          recipeId: undefined,
-        } as never);
+          recipe_id: card.recipeId,
+        });
       }
       setLive((prev) => prev.filter((l) => l.jobId !== card.jobId));
       await qc.invalidateQueries({ queryKey: ["studio-results"] });
