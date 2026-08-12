@@ -44,6 +44,8 @@ export type BatchItem = {
   sourceAssetId: string;
   durationSeconds: number;
   createdAt: string;
+  outputPath: string | null;
+  thumbnailPath: string | null;
   stage: RenderStage;
   progress: number;
   url?: string;
@@ -129,6 +131,8 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
       sourceAssetId: asset.id,
       durationSeconds: CLIP_SECONDS,
       createdAt: job.created_at,
+      outputPath: null,
+      thumbnailPath: null,
       stage: "queued",
       progress: 0,
     });
@@ -210,6 +214,8 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         .eq("id", item.jobId);
 
       patch(item.jobId, {
+        outputPath: outPath,
+        thumbnailPath: thumbPath,
         stage: "completed",
         progress: 100,
         url,
