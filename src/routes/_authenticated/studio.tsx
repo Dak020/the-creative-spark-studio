@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, Film, Loader2, Plus, Trash2, Trophy, Upload, Wand2 } from "lucide-react";
+import { Download, Film, Loader2, Plus, Trophy, Upload, Wand2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { EmptyState, PageHeader, StatusPill } from "@/components/ui-kit";
@@ -20,17 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { HOOK_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDate, fmtDuration, signedUrl } from "@/lib/db";
@@ -43,6 +32,7 @@ import {
   type BatchItem,
 } from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
+import { DeleteRenderButton } from "@/components/DeleteRenderButton";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
@@ -705,31 +695,6 @@ function StudioPage() {
         )}
       </section>
     </div>
-  );
-}
-
-export function DeleteRenderButton({ onConfirm }: { onConfirm: () => void | Promise<void> }) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button size="sm" variant="ghost" aria-label="Delete render">
-          <Trash2 className="size-3.5" />
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this render?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The rendered video and its stored output file are permanently removed. Your uploaded source clip
-            and the hook stay in your library.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => void onConfirm()}>Delete render</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 

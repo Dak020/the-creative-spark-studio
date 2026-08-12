@@ -22,7 +22,7 @@ import { fmtDate, audienceSummary, signedUrl } from "@/lib/db";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 import { CLIP_SECONDS, STAGE_LABEL, runBatch, type BatchItem } from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
-import { DeleteRenderButton } from "@/routes/_authenticated/studio";
+import { DeleteRenderButton } from "@/components/DeleteRenderButton";
 import { platformLabel, styleLabel } from "@/lib/constants";
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
