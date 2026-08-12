@@ -22,16 +22,22 @@ import {
 } from "@/components/ui/select";
 import { HOOK_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
-import { fmtDuration, signedUrl } from "@/lib/db";
-import { planStartOffsets, renderVariant } from "@/lib/render/browser-render";
+import { fmtDate, fmtDuration, signedUrl } from "@/lib/db";
+import {
+  CLIP_SECONDS,
+  OUT_H,
+  OUT_W,
+  STAGE_LABEL,
+  runBatch,
+  type BatchItem,
+} from "@/lib/render/pipeline";
+import { deleteRender } from "@/lib/render/delete";
+import { DeleteRenderButton } from "@/components/DeleteRenderButton";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
 
-
-const CLIP_SECONDS = 8;
-const OUT_W = 1080;
-const OUT_H = 1920;
-const MAX_VARIANTS = 5;
-
+const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
+const MAX_HOOKS = 10;
+const MAX_QUANTITY = 30;
 
 export const Route = createFileRoute("/_authenticated/studio")({
   head: () => ({
@@ -39,12 +45,13 @@ export const Route = createFileRoute("/_authenticated/studio")({
       { title: "Studio — Creative Factory" },
       {
         name: "description",
-        content: "Upload one clip, pick 5 winning hooks, and render 5 ready-to-post vertical videos.",
+        content:
+          "Upload one clip, pick your winning hooks, choose a batch size and render vertical videos with the hook burned in.",
       },
       { property: "og:title", content: "Studio — Creative Factory" },
       {
         property: "og:description",
-        content: "The complete upload, hook selection, render and download workflow.",
+        content: "The complete upload, hook selection, batch render, download and cleanup workflow.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -53,16 +60,7 @@ export const Route = createFileRoute("/_authenticated/studio")({
   component: StudioPage,
 });
 
-type BatchItem = {
-  jobId: string;
-  hookId: string;
-  hookText: string;
-  status: "queued" | "processing" | "completed" | "failed";
-  progress: number;
-  url?: string;
-  filename?: string;
-  error?: string;
-};
+type ResultCard = BatchItem & { videoId: string | null };
 
 function StudioPage() {
   const { user } = useAuth();
@@ -72,14 +70,25 @@ function StudioPage() {
   const [uploading, setUploading] = useState(false);
   const [assetId, setAssetId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [batch, setBatch] = useState<BatchItem[]>([]);
+  const [live, setLive] = useState<BatchItem[]>([]);
   const [rendering, setRendering] = useState(false);
+  const [requested, setRequested] = useState(0);
+
+  const [quantityChoice, setQuantityChoice] = useState<string>("5");
+  const [customQuantity, setCustomQuantity] = useState("8");
 
   const [text, setText] = useState("");
   const [category, setCategory] = useState<string>(HOOK_CATEGORIES[0]);
   const [notes, setNotes] = useState("");
   const [winner, setWinner] = useState(true);
   const [savingHook, setSavingHook] = useState(false);
+
+  const quantity = useMemo(() => {
+    if (quantityChoice !== "custom") return Number(quantityChoice);
+    const n = Math.round(Number(customQuantity));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(MAX_QUANTITY, Math.max(1, n));
+  }, [quantityChoice, customQuantity]);
 
   const { data: assets } = useQuery({
     queryKey: ["studio-assets"],
@@ -105,37 +114,83 @@ function StudioPage() {
     },
   });
 
-  // Previously rendered variants, so results survive a page reload.
+  // Persisted results, so everything survives a page reload.
   const { data: pastResults } = useQuery({
     queryKey: ["studio-results"],
-    queryFn: async (): Promise<BatchItem[]> => {
-      const { data } = await supabase
-        .from("generated_videos")
-        .select("id, hook_id, hook_text, output_url, status, created_at")
-        .order("created_at", { ascending: false })
-        .limit(MAX_VARIANTS);
-      const rows = data ?? [];
-      return Promise.all(
-        rows.map(async (r): Promise<BatchItem> => {
+    queryFn: async (): Promise<ResultCard[]> => {
+      const [videos, failedJobs] = await Promise.all([
+        supabase
+          .from("generated_videos")
+          .select(
+            "id, hook_id, hook_text, output_url, thumbnail_url, duration, status, created_at, render_job_id, recipe_id, media_asset_id, media_assets(filename)",
+          )
+          .order("created_at", { ascending: false })
+          .limit(30),
+        supabase
+          .from("render_jobs")
+          .select("id, status, error_message, created_at, video_recipes(overlay_text, media_asset_id)")
+          .eq("status", "failed")
+          .order("created_at", { ascending: false })
+          .limit(12),
+      ]);
+
+      const done: ResultCard[] = await Promise.all(
+        (videos.data ?? []).map(async (r): Promise<ResultCard> => {
           const url = await resolveRenderUrl(r.output_url);
+          const ok = Boolean(url) && r.status === "completed";
           return {
-            jobId: r.id,
+            jobId: r.render_job_id ?? r.id,
+            videoId: r.id,
+            recipeId: r.recipe_id,
             hookId: r.hook_id ?? "",
-            hookText: r.hook_text ?? "",
-            status: url && r.status === "completed" ? "completed" : "failed",
+            hookText: r.hook_text ?? "Untitled hook",
+            sourceName: (r.media_assets as { filename?: string } | null)?.filename ?? "Source clip",
+            sourceAssetId: r.media_asset_id ?? "",
+            durationSeconds: Number(r.duration ?? CLIP_SECONDS),
+            createdAt: r.created_at,
+            outputPath: r.output_url,
+            thumbnailPath: r.thumbnail_url,
+            stage: ok ? "completed" : "failed",
             progress: 100,
             ...(url ? { url } : { error: "Output file is missing from storage." }),
             filename: renderFilename(r.output_url, `hook-variant-${r.id.slice(0, 6)}`),
           };
         }),
       );
+
+      const videoJobIds = new Set(done.map((d) => d.jobId));
+      const failed: ResultCard[] = (failedJobs.data ?? [])
+        .filter((j) => !videoJobIds.has(j.id))
+        .map((j) => ({
+          jobId: j.id,
+          videoId: null,
+          recipeId: null,
+          hookId: "",
+          hookText:
+            (j.video_recipes as { overlay_text?: string } | null)?.overlay_text ?? "Untitled hook",
+          sourceName: "Source clip",
+          sourceAssetId: (j.video_recipes as { media_asset_id?: string } | null)?.media_asset_id ?? "",
+          durationSeconds: CLIP_SECONDS,
+          createdAt: j.created_at,
+          outputPath: null,
+          thumbnailPath: null,
+          stage: "failed" as const,
+          progress: 100,
+          error: j.error_message ?? "Render failed.",
+        }));
+
+      return [...done, ...failed].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     },
   });
 
+  const liveIds = new Set(live.map((l) => l.jobId));
+  const results: ResultCard[] = [
+    ...live.map((l) => ({ ...l, videoId: l.videoId })),
+    ...(pastResults ?? []).filter((p) => !liveIds.has(p.jobId)),
+  ];
 
-  const results: BatchItem[] = batch.length > 0 ? batch : (pastResults ?? []);
-
-
+  const completedCount = live.filter((l) => l.stage === "completed").length;
+  const failedItems = live.filter((l) => l.stage === "failed");
 
   const asset = useMemo(
     () => (assets ?? []).find((a) => a.id === assetId) ?? (assets ?? [])[0] ?? null,
@@ -221,7 +276,6 @@ function StudioPage() {
     [qc, user],
   );
 
-
   async function saveHook() {
     if (!user) return;
     if (text.trim().length < 4) {
@@ -252,8 +306,8 @@ function StudioPage() {
   function toggleHook(id: string) {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((h) => h !== id);
-      if (prev.length >= MAX_VARIANTS) {
-        toast.info(`You can select up to ${MAX_VARIANTS} hooks.`);
+      if (prev.length >= MAX_HOOKS) {
+        toast.info(`You can select up to ${MAX_HOOKS} hooks per batch.`);
         return prev;
       }
       return [...prev, id];
@@ -271,7 +325,8 @@ function StudioPage() {
     }
     const chosen = selected
       .map((id) => (hooks ?? []).find((h) => h.id === id))
-      .filter((h): h is NonNullable<typeof h> => Boolean(h));
+      .filter((h): h is NonNullable<typeof h> => Boolean(h))
+      .map((h) => ({ id: h.id, text: h.text }));
 
     const projectId = await ensureStudioProject(user.id);
     if (!projectId) {
@@ -280,147 +335,60 @@ function StudioPage() {
     }
 
     setRendering(true);
-    const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), chosen.length, CLIP_SECONDS);
-    const items: BatchItem[] = [];
-
+    setRequested(quantity);
+    setLive([]);
     try {
-      for (const hook of chosen) {
-        const { data: recipe, error: recipeErr } = await supabase
-          .from("video_recipes")
-          .insert({
-            user_id: user.id,
-            project_id: projectId,
-            hook_id: hook.id,
-            media_asset_id: asset.id,
-            duration: CLIP_SECONDS,
-            overlay_text: hook.text,
-            overlay_position: "top",
-            font_size: 64,
-            background_color: "#FFFFFF",
-            text_color: "#000000",
-            width: OUT_W,
-            height: OUT_H,
-          })
-          .select("id")
-          .single();
-        if (recipeErr) throw new Error(recipeErr.message);
-
-        const { data: job, error: jobErr } = await supabase
-          .from("render_jobs")
-          .insert({
-            user_id: user.id,
-            project_id: projectId,
-            recipe_id: recipe.id,
-            status: "queued",
-            progress: 0,
-          })
-          .select("id")
-          .single();
-        if (jobErr) throw new Error(jobErr.message);
-
-        items.push({
-          jobId: job.id,
-          hookId: hook.id,
-          hookText: hook.text,
-          status: "queued",
-          progress: 0,
-        });
-      }
+      const items = await runBatch({
+        userId: user.id,
+        projectId,
+        asset: {
+          id: asset.id,
+          filename: asset.filename,
+          duration: asset.duration,
+          storage_path: asset.storage_path,
+        },
+        assetUrl,
+        hooks: chosen,
+        quantity,
+        onUpdate: setLive,
+      });
+      const done = items.filter((i) => i.stage === "completed").length;
+      if (done === items.length) toast.success(`${done} of ${quantity} variants rendered`);
+      else toast.warning(`${done} of ${quantity} variants rendered — see the failed cards below`);
     } catch (e) {
-      setRendering(false);
       toast.error((e as Error).message);
-      return;
+    } finally {
+      setRendering(false);
+      await qc.invalidateQueries({ queryKey: ["studio-results"] });
+      await qc.invalidateQueries({ queryKey: ["project"] });
     }
+  }
 
-    setBatch(items);
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]!;
-      const patch = (p: Partial<BatchItem>) =>
-        setBatch((prev) => prev.map((b) => (b.jobId === item.jobId ? { ...b, ...p } : b)));
-
-      patch({ status: "processing", progress: 5 });
-      await supabase
-        .from("render_jobs")
-        .update({ status: "processing", progress: 5, started_at: new Date().toISOString() })
-        .eq("id", item.jobId);
-
-      try {
-        const { blob, extension, mimeType } = await renderVariant({
-          sourceUrl: assetUrl,
-          startSeconds: offsets[i] ?? 0,
-          durationSeconds: CLIP_SECONDS,
-          width: OUT_W,
-          height: OUT_H,
-          text: item.hookText,
-          fontSize: 64,
-          onProgress: (pct) => patch({ progress: Math.max(5, pct) }),
+  async function removeResult(card: ResultCard) {
+    try {
+      if (card.videoId) {
+        await deleteRender({
+          id: card.videoId,
+          output_url: card.outputPath,
+          thumbnail_url: card.thumbnailPath,
+          render_job_id: card.jobId,
+          recipe_id: card.recipeId,
         });
-
-        if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");
-
-        const outPath = `${user.id}/${item.jobId}.${extension}`;
-        const { error: upErr } = await supabase.storage
-          .from("renders")
-          .upload(outPath, blob, { contentType: mimeType, upsert: true });
-        if (upErr) throw new Error(upErr.message);
-
-        await supabase
-          .from("render_jobs")
-          .update({
-            status: "completed",
-            progress: 100,
-            output_url: outPath,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", item.jobId);
-
-        await supabase.from("generated_videos").insert({
-          user_id: user.id,
-          project_id: projectId,
-          render_job_id: item.jobId,
-          recipe_id: null,
-          hook_id: item.hookId,
-          media_asset_id: asset.id,
-          hook_text: item.hookText,
-          output_url: outPath,
-          duration: CLIP_SECONDS,
-          status: "completed",
-        });
-
-        const url = URL.createObjectURL(blob);
-        patch({
-          status: "completed",
-          progress: 100,
-          url,
-          filename: `hook-variant-${i + 1}.${extension}`,
-        });
-      } catch (e) {
-        const message = (e as Error).message;
-        patch({ status: "failed", progress: 100, error: message });
-        await supabase
-          .from("render_jobs")
-          .update({
-            status: "failed",
-            progress: 100,
-            error_message: message,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", item.jobId);
       }
+      setLive((prev) => prev.filter((l) => l.jobId !== card.jobId));
+      await qc.invalidateQueries({ queryKey: ["studio-results"] });
+      await qc.invalidateQueries({ queryKey: ["project"] });
+      toast.success("Render deleted");
+    } catch (e) {
+      toast.error((e as Error).message);
     }
-
-    setRendering(false);
-    await qc.invalidateQueries({ queryKey: ["studio-results"] });
-    toast.success("Batch finished");
-
   }
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Studio"
-        description={`Upload one clip, select up to ${MAX_VARIANTS} hooks, render ready-to-post 8s vertical videos.`}
+        description="Upload one clip, select your hooks, choose how many variants to render, and export ready-to-post vertical videos."
       />
 
       {/* 1. Source video */}
@@ -495,7 +463,7 @@ function StudioPage() {
       <section className="panel p-5">
         <h2 className="text-sm font-semibold">2. Hook library</h2>
         <p className="text-xs text-muted-foreground">
-          Save your winning openings, then select up to {MAX_VARIANTS} for this batch.
+          Save your winning openings, then select up to {MAX_HOOKS} for this batch.
         </p>
 
         <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -551,11 +519,9 @@ function StudioPage() {
           </div>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {selected.length}/{MAX_VARIANTS} selected
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              {selected.length}/{MAX_HOOKS} selected
+            </p>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
               {(hooks ?? []).length === 0 ? (
                 <p className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -589,20 +555,82 @@ function StudioPage() {
       </section>
 
       {/* 3. Batch */}
-      <section className="panel flex flex-wrap items-center justify-between gap-4 p-5">
+      <section className="panel space-y-4 p-5">
         <div>
           <h2 className="text-sm font-semibold">3. Create the batch</h2>
           <p className="text-xs text-muted-foreground">
-            Each variant trims a different {CLIP_SECONDS}s section and burns in one hook.
+            Each variant trims a different {CLIP_SECONDS}s section and burns one hook into the exported file.
           </p>
         </div>
-        <Button
-          onClick={() => void createVariants()}
-          disabled={rendering || selected.length === 0 || !asset}
-        >
-          {rendering ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-          Render {selected.length || 1} variant{selected.length === 1 ? "" : "s"}
-        </Button>
+
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Batch quantity</Label>
+            <Select value={quantityChoice} onValueChange={setQuantityChoice}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {QUANTITY_PRESETS.map((q) => (
+                  <SelectItem key={q} value={String(q)}>
+                    {q} variant{q === 1 ? "" : "s"}
+                  </SelectItem>
+                ))}
+                <SelectItem value="custom">Custom…</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {quantityChoice === "custom" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="custom-qty" className="text-xs">
+                How many? (1–{MAX_QUANTITY})
+              </Label>
+              <Input
+                id="custom-qty"
+                type="number"
+                min={1}
+                max={MAX_QUANTITY}
+                value={customQuantity}
+                onChange={(e) => setCustomQuantity(e.target.value)}
+                className="w-32"
+              />
+            </div>
+          ) : null}
+
+          <Button
+            onClick={() => void createVariants()}
+            disabled={rendering || selected.length === 0 || !asset}
+          >
+            {rendering ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+            Render {quantity} variant{quantity === 1 ? "" : "s"}
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Requesting <span className="font-medium text-foreground">{quantity}</span> variant
+          {quantity === 1 ? "" : "s"} from {selected.length || 0} selected hook
+          {selected.length === 1 ? "" : "s"}
+          {selected.length > 0 && quantity > selected.length
+            ? " (hooks cycle across the batch)"
+            : ""}
+          . Nothing extra is generated.
+        </p>
+
+        {requested > 0 ? (
+          <div className="rounded-lg border border-border bg-surface-raised/40 px-4 py-3 text-xs">
+            <span className="font-medium">
+              {completedCount} completed / {requested} requested
+            </span>
+            {failedItems.length > 0 ? (
+              <span className="text-destructive">
+                {" "}
+                · {failedItems.length} failed:{" "}
+                {failedItems.map((f) => f.jobId.slice(0, 8)).join(", ")}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       {/* 4. Results */}
@@ -612,7 +640,7 @@ function StudioPage() {
           <EmptyState
             icon={Film}
             title="No variants yet"
-            description={`Upload a clip, select up to ${MAX_VARIANTS} hooks and run the batch.`}
+            description="Upload a clip, select hooks, choose a batch size and run the render."
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -620,33 +648,44 @@ function StudioPage() {
               <div key={b.jobId} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {b.url ? (
-                    <video src={b.url} controls playsInline className="aspect-[9/16] w-full" />
+                    <video src={b.url} controls playsInline preload="metadata" className="aspect-[9/16] w-full" />
                   ) : (
-                    <div className="flex aspect-[9/16] items-center justify-center text-xs text-muted-foreground">
-                      {b.status === "failed" ? "Render failed" : `Rendering variant ${i + 1}…`}
+                    <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                      {b.stage === "failed" ? "Render failed" : `${STAGE_LABEL[b.stage]}…`}
                     </div>
                   )}
                 </div>
                 <p className="line-clamp-2 text-sm font-medium">{b.hookText}</p>
-                <div className="flex items-center justify-between gap-2">
-                  <StatusPill status={b.status} />
-                  {b.url ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void downloadRender(b.url!, b.filename ?? `hook-variant-${i + 1}.mp4`).catch((e) =>
-                          toast.error((e as Error).message),
-                        )
-                      }
-                    >
-                      <Download className="size-3.5" />
-                      Download
-                    </Button>
-                  ) : null}
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {b.sourceName} · {Math.round(b.durationSeconds)}s · {fmtDate(b.createdAt)}
+                  <br />
+                  Job {b.jobId.slice(0, 8)}
+                  {b.recipeId ? ` · Recipe ${b.recipeId.slice(0, 8)}` : ""}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <StatusPill status={STAGE_LABEL[b.stage]} />
+                  <div className="flex items-center gap-2">
+                    {b.url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          void downloadRender(b.url!, b.filename ?? `hook-variant-${i + 1}.mp4`).catch((e) =>
+                            toast.error((e as Error).message),
+                          )
+                        }
+                      >
+                        <Download className="size-3.5" />
+                        Download
+                      </Button>
+                    ) : null}
+                    {b.videoId ? (
+                      <DeleteRenderButton onConfirm={() => removeResult(b)} />
+                    ) : null}
+                  </div>
                 </div>
 
-                {b.status !== "completed" && b.status !== "failed" ? (
+                {b.stage !== "completed" && b.stage !== "failed" ? (
                   <Progress value={b.progress} className="h-1.5" />
                 ) : null}
                 {b.error ? <p className="text-[11px] text-destructive">{b.error}</p> : null}

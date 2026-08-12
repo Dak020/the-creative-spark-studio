@@ -132,12 +132,15 @@ export class FfmpegCliRenderer implements VideoRenderer {
 }
 
 /**
- * MVP renderer: composes and validates the full deterministic render plan,
- * emits the exact FFmpeg command, and publishes the source clip as a preview
- * output so the queue, gallery, download and batch flows are fully functional.
+ * Fallback renderer for when no FFmpeg worker is configured.
+ *
+ * It validates the plan and emits the exact reproducible FFmpeg command, but it
+ * cannot composite the hook overlay, so it NEVER reports success — a render
+ * without a burned-in hook must not be recorded as completed. Actual output is
+ * produced by the browser render pipeline (`src/lib/render/pipeline.ts`).
  */
-export class PreviewRenderer implements VideoRenderer {
-  readonly id = "preview";
+export class PlanOnlyRenderer implements VideoRenderer {
+  readonly id = "plan-only";
   isAvailable() {
     return true;
   }
@@ -145,11 +148,16 @@ export class PreviewRenderer implements VideoRenderer {
     const command = buildFfmpegCommand(plan, `${plan.jobId}.mp4`);
     if (!plan.sourceUrl) return { status: "failed", command, error: "Media asset has no source file." };
     if (plan.durationSeconds <= 0) return { status: "failed", command, error: "Invalid duration." };
-    return { status: "completed", outputUrl: plan.sourceUrl, command };
+    return {
+      status: "failed",
+      command,
+      error: "No overlay-capable render worker is configured — render this variant from the Studio.",
+    };
   }
 }
 
+
 export function getRenderer(): VideoRenderer {
   const ffmpeg = new FfmpegCliRenderer();
-  return ffmpeg.isAvailable() ? ffmpeg : new PreviewRenderer();
+  return ffmpeg.isAvailable() ? ffmpeg : new PlanOnlyRenderer();
 }

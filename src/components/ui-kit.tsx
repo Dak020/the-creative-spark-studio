@@ -78,6 +78,9 @@ export function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
     queued: "border-border-strong bg-muted text-muted-foreground",
     processing: "border-info/40 bg-info/10 text-info",
+    rendering: "border-info/40 bg-info/10 text-info",
+    encoding: "border-info/40 bg-info/10 text-info",
+    uploading: "border-info/40 bg-info/10 text-info",
     completed: "border-success/40 bg-success/10 text-success",
     failed: "border-destructive/40 bg-destructive/10 text-destructive",
     active: "border-primary/40 bg-primary/10 text-primary",
@@ -85,7 +88,7 @@ export function StatusPill({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${
-        map[status] ?? "border-border bg-muted text-muted-foreground"
+        map[status.toLowerCase()] ?? "border-border bg-muted text-muted-foreground"
       }`}
     >
       <span className="size-1.5 rounded-full bg-current" />
