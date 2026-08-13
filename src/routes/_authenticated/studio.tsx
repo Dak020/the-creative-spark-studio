@@ -668,7 +668,7 @@ function StudioPage() {
               <div key={b.jobId} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {b.url ? (
-                    <video src={b.url} controls playsInline preload="metadata" className="aspect-[9/16] w-full" />
+                    <RenderPlayer src={b.url} />
                   ) : (
                     <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
                       {b.stage === "failed" ? "Render failed" : `${STAGE_LABEL[b.stage]}…`}
