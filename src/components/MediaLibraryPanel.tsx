@@ -189,8 +189,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       logUploadDiagnostic("Project ID", projectId ? "success" : "failure", projectId ?? "null");
 
       let created = 0;
+      const total = files.length;
 
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
+        const base = Math.round((index / total) * 100);
+        const span = 100 / total;
+        const at = (fraction: number) => Math.min(99, Math.round(base + span * fraction));
+        const name = file.name || "clip";
+        setPhase(at(0.05), `Checking ${name}`);
+
         const ext = videoExtension(file);
         logUploadDiagnostic("File received", "success", {
           isFile: file instanceof File,
