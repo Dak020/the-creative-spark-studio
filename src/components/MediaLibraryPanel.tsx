@@ -422,10 +422,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
             const files = Array.from(input.files ?? []);
             input.value = "";
             setUploadDiagnostics([]);
-            console.log("[Studio upload] File input change event", {
-              fileCount: files.length,
-              firstFile: files[0] ?? null,
-            });
+            setUploadError(null);
+            setUploadDone(null);
             logUploadDiagnostic(
               "File input change event",
               files[0] ? "success" : "failure",
@@ -441,6 +439,7 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
             );
             if (files.length) {
               setUploading(true);
+              setPhase(2, `Preparing ${files.length} file${files.length === 1 ? "" : "s"}`);
               upload.mutate(files);
             }
           }}
@@ -451,26 +450,60 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
         </Button>
       </div>
 
-      {uploadDiagnostics.length > 0 ? (
-        <div className="panel border-border p-4" role="status" aria-live="polite">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-xs font-semibold">Upload diagnostics</h3>
-            <span className="font-mono text-[10px] text-muted-foreground">temporary developer panel</span>
+      {progress ? (
+        <div className="rounded-lg border border-border bg-surface-raised/40 px-4 py-3" role="status" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-center gap-2">
+              {uploadDone ? (
+                <CheckCircle2 className="size-3.5 shrink-0 text-primary" />
+              ) : (
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+              )}
+              <span className="truncate">{uploadDone ?? progress.label}</span>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+              {Math.round(progress.pct)}%
+            </span>
           </div>
-          <dl className="space-y-2 font-mono text-[11px]">
-            {uploadDiagnostics.map((entry) => (
-              <div key={entry.stage} className="grid gap-1 border-t border-border pt-2 sm:grid-cols-[180px_1fr]">
-                <dt className="font-medium">
-                  {entry.stage}: {entry.status === "success" ? "✓" : entry.status === "failure" ? "✗" : "…"}
-                </dt>
-                <dd className={entry.status === "failure" ? "whitespace-pre-wrap text-destructive" : "whitespace-pre-wrap text-muted-foreground"}>
-                  {entry.detail}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <Progress value={progress.pct} className="mt-2 h-1.5" />
         </div>
       ) : null}
+
+      {uploadError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+          <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+            <AlertTriangle className="size-3.5" />
+            Upload failed
+          </div>
+          <p className="mt-1 text-xs text-destructive">{uploadError}</p>
+          {uploadDiagnostics.length > 0 ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[11px] text-muted-foreground">
+                Technical details
+              </summary>
+              <dl className="mt-2 space-y-2 font-mono text-[11px]">
+                {uploadDiagnostics.map((entry) => (
+                  <div key={entry.stage} className="grid gap-1 border-t border-border pt-2 sm:grid-cols-[180px_1fr]">
+                    <dt className="font-medium">
+                      {entry.stage}: {entry.status === "success" ? "✓" : entry.status === "failure" ? "✗" : "…"}
+                    </dt>
+                    <dd
+                      className={
+                        entry.status === "failure"
+                          ? "whitespace-pre-wrap break-words text-destructive"
+                          : "whitespace-pre-wrap break-words text-muted-foreground"
+                      }
+                    >
+                      {entry.detail}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
 
       {isLoading ? (
         <div className="panel flex items-center justify-center py-20">
