@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import { MediaLibraryPanel } from "@/components/MediaLibraryPanel";
 import { HookLibraryPanel } from "@/components/HookLibraryPanel";
 import { EmptyState, PageHeader, StatCard, StatusPill } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -20,12 +22,21 @@ import {
 } from "@/components/ui/select";
 import { fmtDate, audienceSummary, signedUrl } from "@/lib/db";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
-import { CLIP_SECONDS, STAGE_LABEL, runBatch, type BatchItem } from "@/lib/render/pipeline";
+import {
+  CLIP_SECONDS,
+  STAGE_LABEL,
+  reapStaleJobs,
+  runBatch,
+  type BatchItem,
+} from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
+import { RenderPlayer } from "@/components/RenderPlayer";
 import { platformLabel, styleLabel } from "@/lib/constants";
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
+const MAX_QUANTITY = 30;
+
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   head: () => ({
