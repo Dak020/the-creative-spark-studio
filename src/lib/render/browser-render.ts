@@ -63,9 +63,12 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
 }
 
 /**
- * Shrink the type until the wrapped hook fits both the horizontal safe width
- * and the vertical overlay band. Long hooks stay fully visible and never get
- * cropped or silently truncated.
+ * Lay the hook out like a native TikTok/Reels caption block: heavy black type
+ * on white rounded boxes that hug each wrapped line.
+ *
+ * Everything is derived from the hook itself — a short hook gets large type and
+ * one small box, a long hook gets smaller type wrapped over several wider
+ * boxes. Nothing is forced into a fixed-size box.
  */
 function layoutOverlay(
   ctx: CanvasRenderingContext2D,
@@ -74,34 +77,39 @@ function layoutOverlay(
   height: number,
   requestedSize: number,
 ) {
-  const maxTextWidth = Math.round(width * 0.78);
-  const maxBandHeight = Math.round(height * 0.46);
-  const minSize = 26;
-  let size = Math.max(minSize, Math.min(requestedSize, Math.round(width * 0.09)));
+  const maxTextWidth = Math.round(width * 0.8);
+  const maxBandHeight = Math.round(height * 0.42);
+  const minSize = 30;
+  const chars = text.trim().length;
+
+  // Start big for short hooks, progressively smaller for long ones.
+  const startRatio = chars <= 24 ? 0.098 : chars <= 45 ? 0.086 : chars <= 80 ? 0.074 : 0.064;
+  let size = Math.max(minSize, Math.round(width * startRatio));
+  if (requestedSize > 0) size = Math.min(size, Math.round(requestedSize * 1.6));
   let lines: string[] = [];
 
   for (;;) {
     ctx.font = fontFor(size);
     lines = wrapLines(ctx, text, maxTextWidth);
-    const boxH = size + Math.round(size * 0.3) * 2;
-    const total = lines.length * boxH + (lines.length - 1) * Math.round(size * 0.14);
+    const boxH = Math.round(size * 1.46);
+    const total = lines.length * boxH + (lines.length - 1) * Math.round(size * 0.05);
     const widest = Math.max(...lines.map((l) => ctx.measureText(l).width), 0);
     if ((total <= maxBandHeight && widest <= maxTextWidth) || size <= minSize) break;
     size -= 2;
   }
 
-  const boxPadX = Math.round(size * 0.34);
-  const boxPadY = Math.round(size * 0.3);
-  const lineGap = Math.round(size * 0.14);
-  const boxH = size + boxPadY * 2;
+  const boxPadX = Math.round(size * 0.32);
+  const lineGap = Math.round(size * 0.05);
+  const boxH = Math.round(size * 1.46);
   const blockH = lines.length * boxH + (lines.length - 1) * lineGap;
   // Keep the whole block between the top UI safe area and the caption area.
-  const topSafe = Math.round(height * 0.14);
-  const bottomSafe = Math.round(height * 0.72);
-  const blockTop = Math.min(Math.round(height * 0.17), Math.max(topSafe, bottomSafe - blockH));
+  const topSafe = Math.round(height * 0.15);
+  const bottomSafe = Math.round(height * 0.7);
+  const blockTop = Math.min(Math.round(height * 0.19), Math.max(topSafe, bottomSafe - blockH));
 
-  return { size, lines, boxPadX, boxH, lineGap, blockTop, radius: Math.round(size * 0.1) };
+  return { size, lines, boxPadX, boxH, lineGap, blockTop, radius: Math.round(size * 0.14) };
 }
+
 
 function waitFor(el: HTMLVideoElement, event: string) {
   return new Promise<void>((resolve, reject) => {
