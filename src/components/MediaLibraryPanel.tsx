@@ -99,6 +99,7 @@ async function probeVideo(file: File) {
 export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const creepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [uploading, setUploading] = useState(false);
@@ -107,6 +108,24 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [editCategory, setEditCategory] = useState("Other");
   const [editTags, setEditTags] = useState("");
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
+  const [uploadDone, setUploadDone] = useState<string | null>(null);
+
+  function stopCreep() {
+    if (creepRef.current) clearInterval(creepRef.current);
+    creepRef.current = null;
+  }
+
+  /** Move the bar to `pct` and, optionally, creep slowly toward `ceiling`. */
+  function setPhase(pct: number, label: string, ceiling?: number) {
+    stopCreep();
+    setProgress({ pct, label });
+    if (ceiling === undefined) return;
+    creepRef.current = setInterval(() => {
+      setProgress((p) => (p && p.pct < ceiling ? { ...p, pct: Math.min(ceiling, p.pct + 1) } : p));
+    }, 350);
+  }
 
   function logUploadDiagnostic(
     stage: string,
@@ -114,12 +133,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
     detail: unknown,
   ) {
     const renderedDetail = typeof detail === "string" ? detail : diagnosticDetail(detail);
-    console.log(`[Studio upload] ${stage}: ${status}`, detail);
     setUploadDiagnostics((current) => [
       ...current.filter((entry) => entry.stage !== stage),
       { stage, status, detail: renderedDetail },
     ]);
   }
+
 
   const { data: assets, isLoading } = useQuery({
     queryKey: ["media", projectId ?? "all"],
