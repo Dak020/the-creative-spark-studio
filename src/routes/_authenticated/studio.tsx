@@ -94,7 +94,9 @@ function StudioPage() {
   }, [quantityChoice, customQuantity]);
 
   const { data: assets } = useQuery({
-    queryKey: ["studio-assets"],
+    queryKey: ["studio-assets", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("media_assets")
@@ -106,7 +108,9 @@ function StudioPage() {
   });
 
   const { data: hooks } = useQuery({
-    queryKey: ["studio-hooks"],
+    queryKey: ["studio-hooks", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("hooks")
@@ -119,8 +123,11 @@ function StudioPage() {
 
   // Persisted results, so everything survives a page reload.
   const { data: pastResults } = useQuery({
-    queryKey: ["studio-results"],
+    queryKey: ["studio-results", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async (): Promise<ResultCard[]> => {
+
       const [videos, failedJobs] = await Promise.all([
         supabase
           .from("generated_videos")
