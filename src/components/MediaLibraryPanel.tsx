@@ -217,7 +217,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           throw new Error(invalid);
         }
 
+        setPhase(at(0.15), `Reading ${name}`);
         const meta = await withTimeout(probeVideo(file), 15000, {
+
           duration: 0,
           width: 0,
           height: 0,
@@ -237,12 +239,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           contentType: file.type || "video/mp4",
           size: file.size,
         });
+        setPhase(at(0.3), `Uploading ${name}`, at(0.85));
         const storageResult = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4" });
         const { error: upErr } = storageResult;
         logUploadDiagnostic("Storage upload result", upErr ? "failure" : "success", storageResult);
         if (upErr) throw new Error(`Storage upload failed for ${file.name}: ${upErr.message}`);
+        setPhase(at(0.9), `Saving ${name}`);
+
 
         let thumbnailUrl: string | null = null;
         if (meta.thumb) {
