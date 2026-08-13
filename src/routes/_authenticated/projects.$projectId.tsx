@@ -55,12 +55,30 @@ function ProjectWorkspace() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
-  const [quantity, setQuantity] = useState("5");
+  const [quantityChoice, setQuantityChoice] = useState("5");
+  const [customQuantity, setCustomQuantity] = useState("8");
   const [live, setLive] = useState<BatchItem[]>([]);
 
+  const quantity = useMemo(() => {
+    if (quantityChoice !== "custom") return Number(quantityChoice);
+    const n = Math.round(Number(customQuantity));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(MAX_QUANTITY, Math.max(1, n));
+  }, [quantityChoice, customQuantity]);
+
+  // Abandoned jobs (closed tab, crashed render) must not sit in the queue forever.
+  useEffect(() => {
+    if (!user) return;
+    void reapStaleJobs(user.id, projectId).then(() =>
+      qc.invalidateQueries({ queryKey: ["project", projectId] }),
+    );
+  }, [user?.id, projectId, qc]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["project", projectId],
-    refetchInterval: running ? false : 8000,
+    // Scoped to the signed-in user so a different account never reads this cache.
+    queryKey: ["project", projectId, user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const [project, product, jobs, videos, hooks, media] = await Promise.all([
         supabase.from("projects").select("*").eq("id", projectId).maybeSingle(),
@@ -87,6 +105,7 @@ function ProjectWorkspace() {
         (videos.data ?? []).map(async (v) => ({
           ...v,
           playbackUrl: await resolveRenderUrl(v.output_url),
+          posterUrl: await resolveRenderUrl(v.thumbnail_url),
         })),
       );
       return {
@@ -97,6 +116,14 @@ function ProjectWorkspace() {
         hooks: hooks.data ?? [],
         media: media.data ?? [],
       };
+    },
+    // Only poll while something is actually in flight.
+    refetchInterval: (q) => {
+      if (running) return false;
+      const active = (q.state.data?.jobs ?? []).some(
+        (j: { status: string }) => j.status === "queued" || j.status === "processing",
+      );
+      return active ? 8000 : false;
     },
   });
 
@@ -117,7 +144,7 @@ function ProjectWorkspace() {
       toast.error("The source clip could not be read from storage.");
       return;
     }
-    const count = Number(quantity);
+    const count = quantity;
     setRunning(true);
     setLive([]);
     try {
@@ -140,6 +167,7 @@ function ProjectWorkspace() {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
     }
   }
+
 
   if (isLoading) {
     return (
