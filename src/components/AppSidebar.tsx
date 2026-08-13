@@ -30,9 +30,14 @@ export function AppSidebar() {
   const navigate = useNavigate();
 
   async function signOut() {
+    // Drop every cached row before the session goes away so the next account
+    // never sees the previous user's projects, media, hooks or renders.
+    await qc.cancelQueries();
+    qc.clear();
     await supabase.auth.signOut();
-    navigate({ to: "/auth" });
+    navigate({ to: "/auth", replace: true });
   }
+
 
   return (
     <aside className="sticky top-0 flex h-screen w-[248px] shrink-0 flex-col border-r border-border bg-sidebar">

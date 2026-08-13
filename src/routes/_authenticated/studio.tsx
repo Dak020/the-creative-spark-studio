@@ -440,7 +440,14 @@ function StudioPage() {
         <div className="mt-5 grid gap-5 md:grid-cols-[240px_1fr]">
           <div className="overflow-hidden rounded-xl border border-border bg-black">
             {assetUrl ? (
-              <video src={assetUrl} controls playsInline className="aspect-[9/16] w-full object-cover" />
+              <video
+                src={assetUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="aspect-[9/16] w-full bg-black object-contain"
+              />
+
             ) : (
               <div className="flex aspect-[9/16] items-center justify-center text-xs text-muted-foreground">
                 No source video
