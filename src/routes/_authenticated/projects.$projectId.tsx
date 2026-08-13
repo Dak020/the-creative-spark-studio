@@ -211,25 +211,46 @@ function ProjectWorkspace() {
         title={project.name}
         description={`${platformLabel(project.platform)} · ${styleLabel(project.content_style)} · ${audienceSummary(project)}`}
         actions={
-          <>
-            <Select value={quantity} onValueChange={setQuantity}>
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUANTITY_PRESETS.map((q) => (
-                  <SelectItem key={q} value={String(q)}>
-                    {q} variant{q === 1 ? "" : "s"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Batch quantity</Label>
+              <Select value={quantityChoice} onValueChange={setQuantityChoice}>
+                <SelectTrigger className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUANTITY_PRESETS.map((q) => (
+                    <SelectItem key={q} value={String(q)}>
+                      {q} variant{q === 1 ? "" : "s"}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {quantityChoice === "custom" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="project-custom-qty" className="text-xs">
+                  How many? (1–{MAX_QUANTITY})
+                </Label>
+                <Input
+                  id="project-custom-qty"
+                  type="number"
+                  min={1}
+                  max={MAX_QUANTITY}
+                  value={customQuantity}
+                  onChange={(e) => setCustomQuantity(e.target.value)}
+                  className="w-28"
+                />
+              </div>
+            ) : null}
             <Button onClick={() => void generateBatch()} disabled={running}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-              Render {quantity} variant{quantity === "1" ? "" : "s"}
+              Render {quantity} variant{quantity === 1 ? "" : "s"}
             </Button>
-          </>
+          </div>
         }
+
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
