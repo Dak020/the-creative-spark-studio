@@ -28,12 +28,15 @@ import {
   OUT_H,
   OUT_W,
   STAGE_LABEL,
+  reapStaleJobs,
   runBatch,
   type BatchItem,
 } from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
+import { RenderPlayer } from "@/components/RenderPlayer";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
+
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
 const MAX_HOOKS = 10;
