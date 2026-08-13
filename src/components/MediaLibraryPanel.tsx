@@ -320,18 +320,30 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
     },
 
     onSuccess: (created) => {
+      stopCreep();
+      setProgress({ pct: 100, label: "Done" });
+      setUploadDone(created === 1 ? "1 clip uploaded" : `${created} clips uploaded`);
+      setUploadError(null);
       toast.success(created === 1 ? "Upload complete" : `${created} clips uploaded`);
       qc.invalidateQueries({ queryKey: ["media"] });
       qc.invalidateQueries({ queryKey: ["project"] });
       qc.invalidateQueries({ queryKey: ["studio-assets"] });
+      setTimeout(() => {
+        setProgress(null);
+        setUploadDone(null);
+      }, 4000);
     },
     onError: (e) => {
       const error = e instanceof Error ? e : new Error(diagnosticDetail(e));
+      stopCreep();
+      setProgress(null);
+      setUploadError(error.message);
       logUploadDiagnostic("Upload error", "failure", error);
       toast.error(error.message);
     },
     onSettled: () => setUploading(false),
   });
+
 
 
   const remove = useMutation({
