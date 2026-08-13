@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import { MediaLibraryPanel } from "@/components/MediaLibraryPanel";
 import { HookLibraryPanel } from "@/components/HookLibraryPanel";
 import { EmptyState, PageHeader, StatCard, StatusPill } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -20,12 +22,21 @@ import {
 } from "@/components/ui/select";
 import { fmtDate, audienceSummary, signedUrl } from "@/lib/db";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
-import { CLIP_SECONDS, STAGE_LABEL, runBatch, type BatchItem } from "@/lib/render/pipeline";
+import {
+  CLIP_SECONDS,
+  STAGE_LABEL,
+  reapStaleJobs,
+  runBatch,
+  type BatchItem,
+} from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
+import { RenderPlayer } from "@/components/RenderPlayer";
 import { platformLabel, styleLabel } from "@/lib/constants";
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
+const MAX_QUANTITY = 30;
+
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   head: () => ({
@@ -44,12 +55,30 @@ function ProjectWorkspace() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
-  const [quantity, setQuantity] = useState("5");
+  const [quantityChoice, setQuantityChoice] = useState("5");
+  const [customQuantity, setCustomQuantity] = useState("8");
   const [live, setLive] = useState<BatchItem[]>([]);
 
+  const quantity = useMemo(() => {
+    if (quantityChoice !== "custom") return Number(quantityChoice);
+    const n = Math.round(Number(customQuantity));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(MAX_QUANTITY, Math.max(1, n));
+  }, [quantityChoice, customQuantity]);
+
+  // Abandoned jobs (closed tab, crashed render) must not sit in the queue forever.
+  useEffect(() => {
+    if (!user) return;
+    void reapStaleJobs(user.id, projectId).then(() =>
+      qc.invalidateQueries({ queryKey: ["project", projectId] }),
+    );
+  }, [user?.id, projectId, qc]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["project", projectId],
-    refetchInterval: running ? false : 8000,
+    // Scoped to the signed-in user so a different account never reads this cache.
+    queryKey: ["project", projectId, user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const [project, product, jobs, videos, hooks, media] = await Promise.all([
         supabase.from("projects").select("*").eq("id", projectId).maybeSingle(),
@@ -76,6 +105,7 @@ function ProjectWorkspace() {
         (videos.data ?? []).map(async (v) => ({
           ...v,
           playbackUrl: await resolveRenderUrl(v.output_url),
+          posterUrl: await resolveRenderUrl(v.thumbnail_url),
         })),
       );
       return {
@@ -86,6 +116,14 @@ function ProjectWorkspace() {
         hooks: hooks.data ?? [],
         media: media.data ?? [],
       };
+    },
+    // Only poll while something is actually in flight.
+    refetchInterval: (q) => {
+      if (running) return false;
+      const active = (q.state.data?.jobs ?? []).some(
+        (j: { status: string }) => j.status === "queued" || j.status === "processing",
+      );
+      return active ? 8000 : false;
     },
   });
 
@@ -106,7 +144,7 @@ function ProjectWorkspace() {
       toast.error("The source clip could not be read from storage.");
       return;
     }
-    const count = Number(quantity);
+    const count = quantity;
     setRunning(true);
     setLive([]);
     try {
@@ -129,6 +167,7 @@ function ProjectWorkspace() {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
     }
   }
+
 
   if (isLoading) {
     return (
@@ -172,25 +211,46 @@ function ProjectWorkspace() {
         title={project.name}
         description={`${platformLabel(project.platform)} · ${styleLabel(project.content_style)} · ${audienceSummary(project)}`}
         actions={
-          <>
-            <Select value={quantity} onValueChange={setQuantity}>
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUANTITY_PRESETS.map((q) => (
-                  <SelectItem key={q} value={String(q)}>
-                    {q} variant{q === 1 ? "" : "s"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Batch quantity</Label>
+              <Select value={quantityChoice} onValueChange={setQuantityChoice}>
+                <SelectTrigger className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUANTITY_PRESETS.map((q) => (
+                    <SelectItem key={q} value={String(q)}>
+                      {q} variant{q === 1 ? "" : "s"}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {quantityChoice === "custom" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="project-custom-qty" className="text-xs">
+                  How many? (1–{MAX_QUANTITY})
+                </Label>
+                <Input
+                  id="project-custom-qty"
+                  type="number"
+                  min={1}
+                  max={MAX_QUANTITY}
+                  value={customQuantity}
+                  onChange={(e) => setCustomQuantity(e.target.value)}
+                  className="w-28"
+                />
+              </div>
+            ) : null}
             <Button onClick={() => void generateBatch()} disabled={running}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-              Render {quantity} variant{quantity === "1" ? "" : "s"}
+              Render {quantity} variant{quantity === 1 ? "" : "s"}
             </Button>
-          </>
+          </div>
         }
+
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -283,19 +343,14 @@ function ProjectWorkspace() {
               <div key={v.id} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {v.playbackUrl ? (
-                    <video
-                      src={v.playbackUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="aspect-[9/16] w-full"
-                    />
+                    <RenderPlayer src={v.playbackUrl} poster={v.posterUrl} />
                   ) : (
                     <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
                       Output file missing — re-run this render.
                     </div>
                   )}
                 </div>
+
                 <p className="line-clamp-2 text-sm font-medium">{v.hook_text ?? "Untitled"}</p>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   {(v.media_assets as { filename?: string } | null)?.filename ?? "Source clip"} ·{" "}

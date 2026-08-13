@@ -1,7 +1,18 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Film, Loader2, Search, Trash2, Upload, Play, Tag } from "lucide-react";
+import {
+  Film,
+  Loader2,
+  Search,
+  Trash2,
+  Upload,
+  Play,
+  Tag,
+  CheckCircle2,
+  AlertTriangle,
+} from "lucide-react";
+
 import { supabase } from "@/integrations/supabase/client";
 import { MEDIA_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
@@ -12,6 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
@@ -99,6 +112,7 @@ async function probeVideo(file: File) {
 export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const creepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [uploading, setUploading] = useState(false);
@@ -107,6 +121,24 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [editCategory, setEditCategory] = useState("Other");
   const [editTags, setEditTags] = useState("");
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
+  const [uploadDone, setUploadDone] = useState<string | null>(null);
+
+  function stopCreep() {
+    if (creepRef.current) clearInterval(creepRef.current);
+    creepRef.current = null;
+  }
+
+  /** Move the bar to `pct` and, optionally, creep slowly toward `ceiling`. */
+  function setPhase(pct: number, label: string, ceiling?: number) {
+    stopCreep();
+    setProgress({ pct, label });
+    if (ceiling === undefined) return;
+    creepRef.current = setInterval(() => {
+      setProgress((p) => (p && p.pct < ceiling ? { ...p, pct: Math.min(ceiling, p.pct + 1) } : p));
+    }, 350);
+  }
 
   function logUploadDiagnostic(
     stage: string,
@@ -114,12 +146,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
     detail: unknown,
   ) {
     const renderedDetail = typeof detail === "string" ? detail : diagnosticDetail(detail);
-    console.log(`[Studio upload] ${stage}: ${status}`, detail);
     setUploadDiagnostics((current) => [
       ...current.filter((entry) => entry.stage !== stage),
       { stage, status, detail: renderedDetail },
     ]);
   }
+
 
   const { data: assets, isLoading } = useQuery({
     queryKey: ["media", projectId ?? "all"],
@@ -170,8 +202,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       logUploadDiagnostic("Project ID", projectId ? "success" : "failure", projectId ?? "null");
 
       let created = 0;
+      const total = files.length;
 
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
+        const base = Math.round((index / total) * 100);
+        const span = 100 / total;
+        const at = (fraction: number) => Math.min(99, Math.round(base + span * fraction));
+        const name = file.name || "clip";
+        setPhase(at(0.05), `Checking ${name}`);
+
         const ext = videoExtension(file);
         logUploadDiagnostic("File received", "success", {
           isFile: file instanceof File,
@@ -191,7 +230,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           throw new Error(invalid);
         }
 
+        setPhase(at(0.15), `Reading ${name}`);
         const meta = await withTimeout(probeVideo(file), 15000, {
+
           duration: 0,
           width: 0,
           height: 0,
@@ -211,12 +252,15 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           contentType: file.type || "video/mp4",
           size: file.size,
         });
+        setPhase(at(0.3), `Uploading ${name}`, at(0.85));
         const storageResult = await supabase.storage
           .from("media")
           .upload(path, file, { contentType: file.type || "video/mp4" });
         const { error: upErr } = storageResult;
         logUploadDiagnostic("Storage upload result", upErr ? "failure" : "success", storageResult);
         if (upErr) throw new Error(`Storage upload failed for ${file.name}: ${upErr.message}`);
+        setPhase(at(0.9), `Saving ${name}`);
+
 
         let thumbnailUrl: string | null = null;
         if (meta.thumb) {
@@ -289,18 +333,30 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
     },
 
     onSuccess: (created) => {
+      stopCreep();
+      setProgress({ pct: 100, label: "Done" });
+      setUploadDone(created === 1 ? "1 clip uploaded" : `${created} clips uploaded`);
+      setUploadError(null);
       toast.success(created === 1 ? "Upload complete" : `${created} clips uploaded`);
       qc.invalidateQueries({ queryKey: ["media"] });
       qc.invalidateQueries({ queryKey: ["project"] });
       qc.invalidateQueries({ queryKey: ["studio-assets"] });
+      setTimeout(() => {
+        setProgress(null);
+        setUploadDone(null);
+      }, 4000);
     },
     onError: (e) => {
       const error = e instanceof Error ? e : new Error(diagnosticDetail(e));
+      stopCreep();
+      setProgress(null);
+      setUploadError(error.message);
       logUploadDiagnostic("Upload error", "failure", error);
       toast.error(error.message);
     },
     onSettled: () => setUploading(false),
   });
+
 
 
   const remove = useMutation({
@@ -379,10 +435,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
             const files = Array.from(input.files ?? []);
             input.value = "";
             setUploadDiagnostics([]);
-            console.log("[Studio upload] File input change event", {
-              fileCount: files.length,
-              firstFile: files[0] ?? null,
-            });
+            setUploadError(null);
+            setUploadDone(null);
             logUploadDiagnostic(
               "File input change event",
               files[0] ? "success" : "failure",
@@ -398,6 +452,7 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
             );
             if (files.length) {
               setUploading(true);
+              setPhase(2, `Preparing ${files.length} file${files.length === 1 ? "" : "s"}`);
               upload.mutate(files);
             }
           }}
@@ -408,26 +463,60 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
         </Button>
       </div>
 
-      {uploadDiagnostics.length > 0 ? (
-        <div className="panel border-border p-4" role="status" aria-live="polite">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-xs font-semibold">Upload diagnostics</h3>
-            <span className="font-mono text-[10px] text-muted-foreground">temporary developer panel</span>
+      {progress ? (
+        <div className="rounded-lg border border-border bg-surface-raised/40 px-4 py-3" role="status" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-center gap-2">
+              {uploadDone ? (
+                <CheckCircle2 className="size-3.5 shrink-0 text-primary" />
+              ) : (
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+              )}
+              <span className="truncate">{uploadDone ?? progress.label}</span>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+              {Math.round(progress.pct)}%
+            </span>
           </div>
-          <dl className="space-y-2 font-mono text-[11px]">
-            {uploadDiagnostics.map((entry) => (
-              <div key={entry.stage} className="grid gap-1 border-t border-border pt-2 sm:grid-cols-[180px_1fr]">
-                <dt className="font-medium">
-                  {entry.stage}: {entry.status === "success" ? "✓" : entry.status === "failure" ? "✗" : "…"}
-                </dt>
-                <dd className={entry.status === "failure" ? "whitespace-pre-wrap text-destructive" : "whitespace-pre-wrap text-muted-foreground"}>
-                  {entry.detail}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <Progress value={progress.pct} className="mt-2 h-1.5" />
         </div>
       ) : null}
+
+      {uploadError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+          <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+            <AlertTriangle className="size-3.5" />
+            Upload failed
+          </div>
+          <p className="mt-1 text-xs text-destructive">{uploadError}</p>
+          {uploadDiagnostics.length > 0 ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[11px] text-muted-foreground">
+                Technical details
+              </summary>
+              <dl className="mt-2 space-y-2 font-mono text-[11px]">
+                {uploadDiagnostics.map((entry) => (
+                  <div key={entry.stage} className="grid gap-1 border-t border-border pt-2 sm:grid-cols-[180px_1fr]">
+                    <dt className="font-medium">
+                      {entry.stage}: {entry.status === "success" ? "✓" : entry.status === "failure" ? "✗" : "…"}
+                    </dt>
+                    <dd
+                      className={
+                        entry.status === "failure"
+                          ? "whitespace-pre-wrap break-words text-destructive"
+                          : "whitespace-pre-wrap break-words text-muted-foreground"
+                      }
+                    >
+                      {entry.detail}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
 
       {isLoading ? (
         <div className="panel flex items-center justify-center py-20">
@@ -524,20 +613,24 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       )}
 
       <Dialog open={Boolean(preview)} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="truncate">{preview?.asset.filename}</DialogTitle>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="truncate text-sm">{preview?.asset.filename}</DialogTitle>
           </DialogHeader>
           {preview ? (
-            <video
-              src={preview.url}
-              controls
-              playsInline
-              className="max-h-[60vh] w-full rounded-lg bg-black"
-            />
+            <div className="flex max-h-[65vh] w-full items-center justify-center overflow-hidden rounded-lg bg-black">
+              <video
+                src={preview.url}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-[65vh] w-full object-contain"
+              />
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
+
 
       <Dialog open={Boolean(editing)} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-md">

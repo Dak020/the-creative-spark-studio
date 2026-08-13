@@ -28,12 +28,15 @@ import {
   OUT_H,
   OUT_W,
   STAGE_LABEL,
+  reapStaleJobs,
   runBatch,
   type BatchItem,
 } from "@/lib/render/pipeline";
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
+import { RenderPlayer } from "@/components/RenderPlayer";
 import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
+
 
 const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
 const MAX_HOOKS = 10;
@@ -90,8 +93,20 @@ function StudioPage() {
     return Math.min(MAX_QUANTITY, Math.max(1, n));
   }, [quantityChoice, customQuantity]);
 
+  // Jobs abandoned by a closed tab must not linger as "in progress" after a refresh.
+  useEffect(() => {
+    if (!user) return;
+    void reapStaleJobs(user.id).then(() =>
+      qc.invalidateQueries({ queryKey: ["studio-results"] }),
+    );
+  }, [user?.id, qc]);
+
+
+
   const { data: assets } = useQuery({
-    queryKey: ["studio-assets"],
+    queryKey: ["studio-assets", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("media_assets")
@@ -103,7 +118,9 @@ function StudioPage() {
   });
 
   const { data: hooks } = useQuery({
-    queryKey: ["studio-hooks"],
+    queryKey: ["studio-hooks", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("hooks")
@@ -116,8 +133,11 @@ function StudioPage() {
 
   // Persisted results, so everything survives a page reload.
   const { data: pastResults } = useQuery({
-    queryKey: ["studio-results"],
+    queryKey: ["studio-results", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 15_000,
     queryFn: async (): Promise<ResultCard[]> => {
+
       const [videos, failedJobs] = await Promise.all([
         supabase
           .from("generated_videos")
@@ -420,7 +440,14 @@ function StudioPage() {
         <div className="mt-5 grid gap-5 md:grid-cols-[240px_1fr]">
           <div className="overflow-hidden rounded-xl border border-border bg-black">
             {assetUrl ? (
-              <video src={assetUrl} controls playsInline className="aspect-[9/16] w-full object-cover" />
+              <video
+                src={assetUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="aspect-[9/16] w-full bg-black object-contain"
+              />
+
             ) : (
               <div className="flex aspect-[9/16] items-center justify-center text-xs text-muted-foreground">
                 No source video
@@ -648,7 +675,7 @@ function StudioPage() {
               <div key={b.jobId} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {b.url ? (
-                    <video src={b.url} controls playsInline preload="metadata" className="aspect-[9/16] w-full" />
+                    <RenderPlayer src={b.url} />
                   ) : (
                     <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
                       {b.stage === "failed" ? "Render failed" : `${STAGE_LABEL[b.stage]}…`}

@@ -1,4 +1,6 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+
 import {
   Clapperboard,
   LayoutDashboard,
@@ -28,11 +30,18 @@ export function AppSidebar() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user } = useAuth();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+
 
   async function signOut() {
+    // Drop every cached row before the session goes away so the next account
+    // never sees the previous user's projects, media, hooks or renders.
+    await qc.cancelQueries();
+    qc.clear();
     await supabase.auth.signOut();
-    navigate({ to: "/auth" });
+    navigate({ to: "/auth", replace: true });
   }
+
 
   return (
     <aside className="sticky top-0 flex h-screen w-[248px] shrink-0 flex-col border-r border-border bg-sidebar">

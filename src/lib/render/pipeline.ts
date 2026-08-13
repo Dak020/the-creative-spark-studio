@@ -239,3 +239,30 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
 
   return items;
 }
+
+/** Jobs left in an active state longer than this were abandoned (tab closed, crash). */
+export const STALE_JOB_MS = 1000 * 60 * 20;
+
+/**
+ * Renders run in the browser tab that started them, so a closed tab can strand
+ * a job in `queued`/`processing` forever. Flip anything older than the cutoff to
+ * `failed` so the active queue only ever shows work that is really in flight.
+ */
+export async function reapStaleJobs(userId: string, projectId?: string) {
+  const cutoff = new Date(Date.now() - STALE_JOB_MS).toISOString();
+  let q = supabase
+    .from("render_jobs")
+    .update({
+      status: "failed",
+      progress: 100,
+      error_message: "Render was interrupted before it finished. Run it again.",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .in("status", ["queued", "processing"])
+    .lt("created_at", cutoff);
+  if (projectId) q = q.eq("project_id", projectId);
+  const { error } = await q;
+  if (error) return 0;
+  return 1;
+}
