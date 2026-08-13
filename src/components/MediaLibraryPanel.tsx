@@ -613,20 +613,24 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
       )}
 
       <Dialog open={Boolean(preview)} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="truncate">{preview?.asset.filename}</DialogTitle>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="truncate text-sm">{preview?.asset.filename}</DialogTitle>
           </DialogHeader>
           {preview ? (
-            <video
-              src={preview.url}
-              controls
-              playsInline
-              className="max-h-[60vh] w-full rounded-lg bg-black"
-            />
+            <div className="flex max-h-[65vh] w-full items-center justify-center overflow-hidden rounded-lg bg-black">
+              <video
+                src={preview.url}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-[65vh] w-full object-contain"
+              />
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
+
 
       <Dialog open={Boolean(editing)} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-md">
