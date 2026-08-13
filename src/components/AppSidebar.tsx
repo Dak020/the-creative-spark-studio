@@ -28,6 +28,8 @@ export function AppSidebar() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user } = useAuth();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+
 
   async function signOut() {
     // Drop every cached row before the session goes away so the next account
