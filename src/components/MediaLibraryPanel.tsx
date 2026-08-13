@@ -1,7 +1,18 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Film, Loader2, Search, Trash2, Upload, Play, Tag } from "lucide-react";
+import {
+  Film,
+  Loader2,
+  Search,
+  Trash2,
+  Upload,
+  Play,
+  Tag,
+  CheckCircle2,
+  AlertTriangle,
+} from "lucide-react";
+
 import { supabase } from "@/integrations/supabase/client";
 import { MEDIA_CATEGORIES } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
@@ -12,6 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
