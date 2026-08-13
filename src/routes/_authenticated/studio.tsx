@@ -93,6 +93,16 @@ function StudioPage() {
     return Math.min(MAX_QUANTITY, Math.max(1, n));
   }, [quantityChoice, customQuantity]);
 
+  // Jobs abandoned by a closed tab must not linger as "in progress" after a refresh.
+  useEffect(() => {
+    if (!user) return;
+    void reapStaleJobs(user.id).then(() =>
+      qc.invalidateQueries({ queryKey: ["studio-results"] }),
+    );
+  }, [user?.id, qc]);
+
+
+
   const { data: assets } = useQuery({
     queryKey: ["studio-assets", user?.id ?? "anon"],
     enabled: Boolean(user),
