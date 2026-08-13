@@ -343,19 +343,14 @@ function ProjectWorkspace() {
               <div key={v.id} className="panel space-y-3 p-4">
                 <div className="overflow-hidden rounded-lg border border-border bg-black">
                   {v.playbackUrl ? (
-                    <video
-                      src={v.playbackUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="aspect-[9/16] w-full"
-                    />
+                    <RenderPlayer src={v.playbackUrl} poster={v.posterUrl} />
                   ) : (
                     <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
                       Output file missing — re-run this render.
                     </div>
                   )}
                 </div>
+
                 <p className="line-clamp-2 text-sm font-medium">{v.hook_text ?? "Untitled"}</p>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   {(v.media_assets as { filename?: string } | null)?.filename ?? "Source clip"} ·{" "}
