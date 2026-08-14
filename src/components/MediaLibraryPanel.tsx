@@ -46,8 +46,10 @@ export type MediaAsset = {
   size_bytes: number | null;
   category: string;
   tags: string[];
+  hook_placement: string | null;
   created_at: string;
 };
+
 
 type UploadDiagnostic = {
   stage: string;
