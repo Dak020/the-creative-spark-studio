@@ -579,6 +579,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   <Badge variant="secondary" className="text-[10px]">
                     {asset.category}
                   </Badge>
+                  <Badge className="text-[10px]">
+                    Hook: {hookPlacementLabel(asset.hook_placement)}
+                  </Badge>
                   {asset.tags.slice(0, 2).map((t) => (
                     <Badge key={t} variant="outline" className="text-[10px]">
                       {t}
@@ -596,9 +599,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                     onClick={() => {
                       setEditing(asset);
                       setEditCategory(asset.category);
+                      setEditPlacement(asset.hook_placement ?? "top");
                       setEditTags(asset.tags.join(", "));
                     }}
                   >
+
                     <Tag className="size-3" />
                     Tag
                   </Button>
