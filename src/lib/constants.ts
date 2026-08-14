@@ -66,6 +66,19 @@ export const OVERLAY_POSITIONS = [
   { value: "bottom", label: "Bottom (safe area)" },
 ] as const;
 
+/** Where the hook is burned into a clip. Set per clip in the Media Library. */
+export const HOOK_PLACEMENTS = [
+  { value: "top", label: "Top", hint: "Below the platform top bar" },
+  { value: "middle", label: "Middle", hint: "Centered, clear of the icon rail" },
+  { value: "bottom", label: "Bottom", hint: "Above the caption area" },
+] as const;
+export type HookPlacementValue = (typeof HOOK_PLACEMENTS)[number]["value"];
+
+export function hookPlacementLabel(value: string | null | undefined) {
+  return HOOK_PLACEMENTS.find((p) => p.value === value)?.label ?? "Top";
+}
+
+
 export function styleLabel(value: string) {
   return CONTENT_STYLES.find((s) => s.value === value)?.label ?? value;
 }

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
-import { MEDIA_CATEGORIES } from "@/lib/constants";
+import { MEDIA_CATEGORIES, HOOK_PLACEMENTS, hookPlacementLabel } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, fmtDate } from "@/lib/db";
 
@@ -46,8 +46,10 @@ export type MediaAsset = {
   size_bytes: number | null;
   category: string;
   tags: string[];
+  hook_placement: string | null;
   created_at: string;
 };
+
 
 type UploadDiagnostic = {
   stage: string;
@@ -119,7 +121,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [preview, setPreview] = useState<{ asset: MediaAsset; url: string } | null>(null);
   const [editing, setEditing] = useState<MediaAsset | null>(null);
   const [editCategory, setEditCategory] = useState("Other");
+  const [editPlacement, setEditPlacement] = useState<string>("top");
   const [editTags, setEditTags] = useState("");
+
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
@@ -378,8 +382,10 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
         .from("media_assets")
         .update({
           category: editCategory,
+          hook_placement: editPlacement,
           tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
         })
+
         .eq("id", editing.id);
       if (error) throw error;
     },
@@ -573,6 +579,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   <Badge variant="secondary" className="text-[10px]">
                     {asset.category}
                   </Badge>
+                  <Badge className="text-[10px]">
+                    Hook: {hookPlacementLabel(asset.hook_placement)}
+                  </Badge>
                   {asset.tags.slice(0, 2).map((t) => (
                     <Badge key={t} variant="outline" className="text-[10px]">
                       {t}
@@ -590,9 +599,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                     onClick={() => {
                       setEditing(asset);
                       setEditCategory(asset.category);
+                      setEditPlacement(asset.hook_placement ?? "top");
                       setEditTags(asset.tags.join(", "));
                     }}
                   >
+
                     <Tag className="size-3" />
                     Tag
                   </Button>

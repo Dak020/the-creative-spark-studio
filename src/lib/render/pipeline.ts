@@ -9,7 +9,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { planStartOffsets, renderVariant } from "./browser-render";
+import { planStartOffsets, renderVariant, type HookPlacement } from "./browser-render";
 import { resolveRenderUrl } from "./output";
 
 export const RENDER_BUCKET = "renders";
@@ -56,12 +56,19 @@ export type BatchItem = {
 export type BatchInput = {
   userId: string;
   projectId: string;
-  asset: { id: string; filename: string; duration: number | null; storage_path: string };
+  asset: {
+    id: string;
+    filename: string;
+    duration: number | null;
+    storage_path: string;
+    hook_placement?: string | null;
+  };
   assetUrl: string;
   hooks: { id: string; text: string }[];
   quantity: number;
   onUpdate: (items: BatchItem[]) => void;
 };
+
 
 /**
  * Round-robin the selected hooks across the requested number of variants, so
@@ -77,7 +84,12 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
   const plan = planVariants(input.hooks, quantity);
   if (plan.length === 0) throw new Error("Select at least one hook.");
 
+  const placement: HookPlacement =
+    asset.hook_placement === "middle" || asset.hook_placement === "bottom"
+      ? asset.hook_placement
+      : "top";
   const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), plan.length, CLIP_SECONDS);
+
   let items: BatchItem[] = [];
   const push = () => onUpdate([...items]);
   const patch = (jobId: string, p: Partial<BatchItem>) => {
@@ -97,10 +109,11 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         media_asset_id: asset.id,
         duration: CLIP_SECONDS,
         overlay_text: hook.text,
-        overlay_position: "top",
-        font_size: 64,
-        background_color: "#FFFFFF",
-        text_color: "#000000",
+        overlay_position: placement,
+        font_size: 60,
+        background_color: "#00000000",
+        text_color: "#FFFFFF",
+
         width: OUT_W,
         height: OUT_H,
       })
@@ -156,7 +169,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         width: OUT_W,
         height: OUT_H,
         text: item.hookText,
-        fontSize: 64,
+        placement,
         onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
       });
 
