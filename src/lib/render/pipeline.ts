@@ -84,7 +84,12 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
   const plan = planVariants(input.hooks, quantity);
   if (plan.length === 0) throw new Error("Select at least one hook.");
 
+  const placement: HookPlacement =
+    asset.hook_placement === "middle" || asset.hook_placement === "bottom"
+      ? asset.hook_placement
+      : "top";
   const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), plan.length, CLIP_SECONDS);
+
   let items: BatchItem[] = [];
   const push = () => onUpdate([...items]);
   const patch = (jobId: string, p: Partial<BatchItem>) => {
