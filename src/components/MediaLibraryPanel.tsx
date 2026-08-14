@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
-import { MEDIA_CATEGORIES } from "@/lib/constants";
+import { MEDIA_CATEGORIES, HOOK_PLACEMENTS, hookPlacementLabel } from "@/lib/constants";
 import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
 import { fmtDuration, fmtDate } from "@/lib/db";
 
