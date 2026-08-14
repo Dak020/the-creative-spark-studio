@@ -459,7 +459,8 @@ function StudioPage() {
               <div className="text-sm">
                 <p className="font-medium">{asset.filename}</p>
                 <p className="text-xs text-muted-foreground">
-                  Duration {fmtDuration(asset.duration)} · output {OUT_W}×{OUT_H} · {CLIP_SECONDS}s per variant
+                  Duration {fmtDuration(asset.duration)} · output {OUT_W}×{OUT_H} ·{" "}
+                  {Math.round(Math.min(Number(asset.duration ?? CLIP_SECONDS), CLIP_SECONDS))}s per variant
                 </p>
               </div>
             ) : (
@@ -586,7 +587,8 @@ function StudioPage() {
         <div>
           <h2 className="text-sm font-semibold">3. Create the batch</h2>
           <p className="text-xs text-muted-foreground">
-            Each variant trims a different {CLIP_SECONDS}s section and burns one hook into the exported file.
+            Each variant trims a different section (up to {CLIP_SECONDS}s — shorter clips keep their full
+            length) and burns one hook into the exported file.
           </p>
         </div>
 
