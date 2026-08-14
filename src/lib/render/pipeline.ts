@@ -88,7 +88,14 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
     asset.hook_placement === "middle" || asset.hook_placement === "bottom"
       ? asset.hook_placement
       : "top";
-  const offsets = planStartOffsets(Number(asset.duration ?? CLIP_SECONDS), plan.length, CLIP_SECONDS);
+
+  // CLIP_SECONDS is a ceiling, not a target: a clip shorter than 8s must stay
+  // its own length. Only clips longer than 8s get trimmed down to it. Never
+  // stretch/freeze/duplicate a short source just to reach 8 seconds.
+  const sourceDuration = Number(asset.duration ?? CLIP_SECONDS);
+  const outputDuration = sourceDuration > 0 ? Math.min(sourceDuration, CLIP_SECONDS) : CLIP_SECONDS;
+
+  const offsets = planStartOffsets(sourceDuration, plan.length, outputDuration);
 
   let items: BatchItem[] = [];
   const push = () => onUpdate([...items]);
@@ -107,7 +114,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         project_id: projectId,
         hook_id: hook.id,
         media_asset_id: asset.id,
-        duration: CLIP_SECONDS,
+        duration: outputDuration,
         overlay_text: hook.text,
         overlay_position: placement,
         font_size: 60,
@@ -142,7 +149,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
       hookText: hook.text,
       sourceName: asset.filename,
       sourceAssetId: asset.id,
-      durationSeconds: CLIP_SECONDS,
+      durationSeconds: outputDuration,
       createdAt: job.created_at,
       outputPath: null,
       thumbnailPath: null,
@@ -165,7 +172,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
       const { blob, extension, mimeType, thumbnail } = await renderVariant({
         sourceUrl: assetUrl,
         startSeconds: offsets[i] ?? 0,
-        durationSeconds: CLIP_SECONDS,
+        durationSeconds: outputDuration,
         width: OUT_W,
         height: OUT_H,
         text: item.hookText,
@@ -208,7 +215,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
           hook_text: item.hookText,
           output_url: outPath,
           thumbnail_url: thumbPath,
-          duration: CLIP_SECONDS,
+          duration: outputDuration,
           status: "completed",
         })
         .select("id")
