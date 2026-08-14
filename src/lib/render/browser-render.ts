@@ -164,7 +164,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas is not available in this browser.");
 
-  const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.fontSize ?? 64);
+  const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.placement ?? "top");
   const font = fontFor(overlay.size);
 
   const mimeType = pickMimeType();
@@ -180,17 +180,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     recorder.onstop = () => resolve();
   });
 
-  function roundRect(x: number, y: number, w: number, h: number, r: number) {
-    ctx!.beginPath();
-    ctx!.moveTo(x + r, y);
-    ctx!.arcTo(x + w, y, x + w, y + h, r);
-    ctx!.arcTo(x + w, y + h, x, y + h, r);
-    ctx!.arcTo(x, y + h, x, y, r);
-    ctx!.arcTo(x, y, x + w, y, r);
-    ctx!.closePath();
-    ctx!.fill();
-  }
-
   function drawFrame() {
     ctx!.fillStyle = "#000000";
     ctx!.fillRect(0, 0, width, height);
@@ -202,23 +191,23 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     const dh = vh * scale;
     ctx!.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh);
 
-    // Burn the hook in on every single frame.
+    // Burn the hook in on every single frame: heavy white type, hard black
+    // outline, one cohesive centered block — no background box.
     ctx!.font = font;
     ctx!.textBaseline = "middle";
     ctx!.textAlign = "center";
+    ctx!.lineJoin = "round";
+    ctx!.miterLimit = 2;
+    ctx!.lineWidth = overlay.strokeWidth;
+    ctx!.strokeStyle = "#000000";
+    ctx!.fillStyle = "#FFFFFF";
     overlay.lines.forEach((line, i) => {
-      const metrics = ctx!.measureText(line);
-      const boxW = Math.min(
-        Math.round(metrics.width + overlay.boxPadX * 2),
-        Math.round(width * 0.92),
-      );
-      const y = overlay.blockTop + i * (overlay.boxH + overlay.lineGap);
-      ctx!.fillStyle = "#FFFFFF";
-      roundRect(Math.round((width - boxW) / 2), y, boxW, overlay.boxH, overlay.radius);
-      ctx!.fillStyle = "#000000";
-      ctx!.fillText(line, width / 2, y + overlay.boxH / 2 + 1);
+      const y = overlay.blockTop + i * overlay.lineHeight + overlay.lineHeight / 2;
+      ctx!.strokeText(line, width / 2, y);
+      ctx!.fillText(line, width / 2, y);
     });
   }
+
 
   drawFrame();
   recorder.start(200);
