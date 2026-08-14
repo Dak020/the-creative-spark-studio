@@ -246,6 +246,7 @@ export type Database = {
           file_url: string | null
           filename: string
           height: number | null
+          hook_placement: string
           id: string
           project_id: string | null
           size_bytes: number | null
@@ -262,6 +263,7 @@ export type Database = {
           file_url?: string | null
           filename: string
           height?: number | null
+          hook_placement?: string
           id?: string
           project_id?: string | null
           size_bytes?: number | null
@@ -278,6 +280,7 @@ export type Database = {
           file_url?: string | null
           filename?: string
           height?: number | null
+          hook_placement?: string
           id?: string
           project_id?: string | null
           size_bytes?: number | null
