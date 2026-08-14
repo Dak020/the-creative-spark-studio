@@ -382,8 +382,10 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
         .from("media_assets")
         .update({
           category: editCategory,
+          hook_placement: editPlacement,
           tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
         })
+
         .eq("id", editing.id);
       if (error) throw error;
     },
