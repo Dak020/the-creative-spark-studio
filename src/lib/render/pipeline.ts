@@ -56,12 +56,19 @@ export type BatchItem = {
 export type BatchInput = {
   userId: string;
   projectId: string;
-  asset: { id: string; filename: string; duration: number | null; storage_path: string };
+  asset: {
+    id: string;
+    filename: string;
+    duration: number | null;
+    storage_path: string;
+    hook_placement?: string | null;
+  };
   assetUrl: string;
   hooks: { id: string; text: string }[];
   quantity: number;
   onUpdate: (items: BatchItem[]) => void;
 };
+
 
 /**
  * Round-robin the selected hooks across the requested number of variants, so
