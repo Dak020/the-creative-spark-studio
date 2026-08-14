@@ -121,7 +121,9 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [preview, setPreview] = useState<{ asset: MediaAsset; url: string } | null>(null);
   const [editing, setEditing] = useState<MediaAsset | null>(null);
   const [editCategory, setEditCategory] = useState("Other");
+  const [editPlacement, setEditPlacement] = useState<string>("top");
   const [editTags, setEditTags] = useState("");
+
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
