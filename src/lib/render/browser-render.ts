@@ -2,12 +2,15 @@
  * Browser-side deterministic renderer.
  *
  * Draws the source clip into a 1080x1920 canvas (cover crop), burns the hook
- * text into white boxes with heavy black type inside the TikTok/Reels safe
- * area, and records exactly `durationSeconds` of output via MediaRecorder.
+ * text in as heavy white type with a strong black outline — TikTok caption
+ * style, no background box — inside the placement zone chosen for the clip,
+ * and records exactly `durationSeconds` of output via MediaRecorder.
  *
  * The overlay is composited into every recorded frame, so the hook is
  * physically present in the exported file — not drawn by the UI player.
  */
+
+export type HookPlacement = "top" | "middle" | "bottom";
 
 export type BrowserRenderOptions = {
   sourceUrl: string;
@@ -16,6 +19,7 @@ export type BrowserRenderOptions = {
   width: number;
   height: number;
   text: string;
+  placement?: HookPlacement;
   fontSize?: number;
   onProgress?: (pct: number) => void;
 };
@@ -25,6 +29,17 @@ export type BrowserRenderResult = {
   extension: string;
   mimeType: string;
   thumbnail: Blob | null;
+};
+
+/**
+ * Normalized 9:16 safe zones, measured against the platform UI:
+ * the top bar / following-for-you tabs, the right-hand interaction rail and
+ * the bottom caption + progress bar area.
+ */
+export const SAFE_ZONES: Record<HookPlacement, { top: number; bottom: number; width: number }> = {
+  top: { top: 0.12, bottom: 0.32, width: 0.8 },
+  middle: { top: 0.38, bottom: 0.62, width: 0.8 },
+  bottom: { top: 0.6, bottom: 0.78, width: 0.72 },
 };
 
 function pickMimeType(): string {
@@ -42,7 +57,7 @@ function pickMimeType(): string {
 }
 
 function fontFor(size: number) {
-  return `800 ${size}px "Inter", system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif`;
+  return `900 ${size}px "Inter", "Helvetica Neue", system-ui, -apple-system, "Segoe UI", sans-serif`;
 }
 
 function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
@@ -63,53 +78,46 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
 }
 
 /**
- * Lay the hook out like a native TikTok/Reels caption block: heavy black type
- * on white rounded boxes that hug each wrapped line.
- *
- * Everything is derived from the hook itself — a short hook gets large type and
- * one small box, a long hook gets smaller type wrapped over several wider
- * boxes. Nothing is forced into a fixed-size box.
+ * Lay the hook out as ONE cohesive centered text block at natural TikTok
+ * caption scale, shrinking until it fits entirely inside its safe zone.
  */
 function layoutOverlay(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
   height: number,
-  requestedSize: number,
+  placement: HookPlacement,
 ) {
-  const maxTextWidth = Math.round(width * 0.8);
-  const maxBandHeight = Math.round(height * 0.42);
-  const minSize = 30;
-  const chars = text.trim().length;
+  const zone = SAFE_ZONES[placement];
+  const maxTextWidth = Math.round(width * zone.width);
+  const zoneTop = Math.round(height * zone.top);
+  const zoneBottom = Math.round(height * zone.bottom);
+  const maxBlockHeight = zoneBottom - zoneTop;
+  const minSize = 26;
 
-  // Start big for short hooks, progressively smaller for long ones.
-  const startRatio = chars <= 24 ? 0.098 : chars <= 45 ? 0.086 : chars <= 80 ? 0.074 : 0.064;
+  // Natural caption scale: modest to begin with, smaller as the hook grows.
+  const chars = text.trim().length;
+  const startRatio = chars <= 40 ? 0.056 : chars <= 90 ? 0.05 : 0.045;
   let size = Math.max(minSize, Math.round(width * startRatio));
-  if (requestedSize > 0) size = Math.min(size, Math.round(requestedSize * 1.6));
   let lines: string[] = [];
+  let lineHeight = Math.round(size * 1.16);
 
   for (;;) {
     ctx.font = fontFor(size);
     lines = wrapLines(ctx, text, maxTextWidth);
-    const boxH = Math.round(size * 1.46);
-    const total = lines.length * boxH + (lines.length - 1) * Math.round(size * 0.05);
+    lineHeight = Math.round(size * 1.16);
+    const total = lines.length * lineHeight;
     const widest = Math.max(...lines.map((l) => ctx.measureText(l).width), 0);
-    if ((total <= maxBandHeight && widest <= maxTextWidth) || size <= minSize) break;
+    if ((total <= maxBlockHeight && widest <= maxTextWidth) || size <= minSize) break;
     size -= 2;
   }
 
-  const boxPadX = Math.round(size * 0.32);
-  const lineGap = Math.round(size * 0.05);
-  const boxH = Math.round(size * 1.46);
-  const blockH = lines.length * boxH + (lines.length - 1) * lineGap;
-  // Keep the whole block between the top UI safe area and the caption area.
-  const topSafe = Math.round(height * 0.15);
-  const bottomSafe = Math.round(height * 0.7);
-  const blockTop = Math.min(Math.round(height * 0.19), Math.max(topSafe, bottomSafe - blockH));
+  const blockHeight = lines.length * lineHeight;
+  // Center the block vertically inside its own zone; never overflow it.
+  const blockTop = Math.max(zoneTop, zoneTop + Math.round((maxBlockHeight - blockHeight) / 2));
 
-  return { size, lines, boxPadX, boxH, lineGap, blockTop, radius: Math.round(size * 0.14) };
+  return { size, lines, lineHeight, blockTop, strokeWidth: Math.max(6, Math.round(size * 0.18)) };
 }
-
 
 function waitFor(el: HTMLVideoElement, event: string) {
   return new Promise<void>((resolve, reject) => {
@@ -129,6 +137,7 @@ function waitFor(el: HTMLVideoElement, event: string) {
     el.addEventListener("error", fail, { once: true });
   });
 }
+
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
   const { sourceUrl, durationSeconds, width, height, text } = opts;
