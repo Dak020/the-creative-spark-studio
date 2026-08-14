@@ -169,7 +169,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         width: OUT_W,
         height: OUT_H,
         text: item.hookText,
-        fontSize: 64,
+        placement,
         onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
       });
 
