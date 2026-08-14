@@ -109,10 +109,11 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         media_asset_id: asset.id,
         duration: CLIP_SECONDS,
         overlay_text: hook.text,
-        overlay_position: "top",
-        font_size: 64,
-        background_color: "#FFFFFF",
-        text_color: "#000000",
+        overlay_position: placement,
+        font_size: 60,
+        background_color: "#00000000",
+        text_color: "#FFFFFF",
+
         width: OUT_W,
         height: OUT_H,
       })
