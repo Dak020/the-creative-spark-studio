@@ -9,7 +9,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { planStartOffsets, renderVariant } from "./browser-render";
+import { planStartOffsets, renderVariant, type HookPlacement } from "./browser-render";
 import { resolveRenderUrl } from "./output";
 
 export const RENDER_BUCKET = "renders";
