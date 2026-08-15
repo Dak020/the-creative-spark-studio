@@ -35,9 +35,18 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard" });
+      if (data.session) navigate({ to: "/dashboard", replace: true });
     });
+    // OAuth returns to this public route; only move on once the session is
+    // actually hydrated, otherwise the protected route bounces straight back.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
+        navigate({ to: "/dashboard", replace: true });
+      }
+    });
+    return () => sub.subscription.unsubscribe();
   }, [navigate]);
+
 
   async function submit(mode: "signin" | "signup") {
     const parsed = credentials.safeParse({ email, password });
