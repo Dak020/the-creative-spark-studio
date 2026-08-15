@@ -665,6 +665,21 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Hook placement</Label>
+              <Select value={editPlacement} onValueChange={setEditPlacement}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HOOK_PLACEMENTS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="tags">Tags (comma separated)</Label>
               <Input
                 id="tags"
