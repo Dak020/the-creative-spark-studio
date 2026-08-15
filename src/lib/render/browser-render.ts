@@ -245,6 +245,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
 
   await new Promise<void>((resolve) => {
     let done = false;
+    let lastRafAt = performance.now();
     const finish = () => {
       if (done) return;
       done = true;
@@ -263,11 +264,18 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       opts.onProgress?.(Math.min(99, Math.round((elapsed / durationSeconds) * 100)));
       if (elapsed >= durationSeconds) finish();
     };
-    // setInterval keeps the capture cadence alive even when rAF is throttled
-    // (background tab / hidden preview), so the recording never stalls short.
-    const timer = setInterval(tick, 1000 / 30);
+    // requestAnimationFrame is the primary driver — it's tied to real paint
+    // timing, so frames come out evenly spaced. The interval is a fallback
+    // ONLY: it steps in solely if rAF has gone quiet (a backgrounded tab
+    // throttles rAF), so the two never draw/capture the same moment twice.
+    const FALLBACK_GAP_MS = 120;
+    const timer = setInterval(() => {
+      if (done) return;
+      if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) tick();
+    }, 1000 / 30);
     const raf = () => {
       if (done) return;
+      lastRafAt = performance.now();
       tick();
       requestAnimationFrame(raf);
     };
