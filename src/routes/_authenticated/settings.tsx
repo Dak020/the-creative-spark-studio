@@ -120,6 +120,35 @@ function SettingsPage() {
           </dl>
         </section>
 
+        <section className="panel space-y-4 p-6 lg:col-span-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Storage</h2>
+            <p className="text-xs text-muted-foreground">
+              {storageLoading ? "Reading usage…" : `${formatBytes(storage?.total ?? 0)} of ${formatBytes(quota)} used`}
+            </p>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-surface-raised">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${usedPct}%` }} />
+          </div>
+          <dl className="grid gap-4 sm:grid-cols-3">
+            {[
+              ["Source clips", storage?.media.bytes ?? 0, `${storage?.media.files ?? 0} files`],
+              ["Generated renders", storage?.renders.bytes ?? 0, `${storage?.renders.files ?? 0} files`],
+              [
+                "Thumbnails",
+                (storage?.media.thumbBytes ?? 0) + (storage?.renders.thumbBytes ?? 0),
+                "posters",
+              ],
+            ].map(([label, bytes, sub]) => (
+              <div key={String(label)}>
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="font-display text-xl font-semibold tabular-nums">{formatBytes(Number(bytes))}</dd>
+                <p className="text-[11px] text-muted-foreground">{sub}</p>
+              </div>
+            ))}
+          </dl>
+        </section>
+
         <section className="panel space-y-3 p-6">
           <h2 className="text-sm font-semibold">Render defaults</h2>
           <dl className="space-y-2 text-sm">
