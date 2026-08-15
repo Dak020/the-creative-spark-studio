@@ -209,9 +209,23 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   }
 
 
+  // Start actual playback first and confirm at least one real video frame has
+  // decoded before we open the recorder. Otherwise the first ~200ms chunk can
+  // land on a blank/pre-play frame — the export would open on empty video
+  // with only the hook text visible for a beat.
+  await video.play();
+  await new Promise<void>((resolve) => {
+    if (typeof video.requestVideoFrameCallback === "function") {
+      video.requestVideoFrameCallback(() => resolve());
+    } else {
+      // Fallback for browsers without requestVideoFrameCallback: one rAF
+      // after play() is enough for the decoder to have produced a frame.
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }
+  });
+
   drawFrame();
   recorder.start(200);
-  await video.play();
 
   const startedAt = performance.now();
   await new Promise<void>((resolve) => {
