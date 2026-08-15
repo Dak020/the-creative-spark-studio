@@ -97,7 +97,7 @@ function ProjectWorkspace() {
         supabase.from("hooks").select("id, text").eq("project_id", projectId),
         supabase
           .from("media_assets")
-          .select("id, filename, duration, storage_path")
+          .select("id, filename, duration, storage_path, hook_placement")
           .eq("project_id", projectId)
           .order("created_at", { ascending: false }),
       ]);
