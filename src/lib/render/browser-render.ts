@@ -116,6 +116,23 @@ function layoutOverlay(
   // Center the block vertically inside its own zone; never overflow it.
   const blockTop = Math.max(zoneTop, zoneTop + Math.round((maxBlockHeight - blockHeight) / 2));
 
+  console.log("[overlay-debug]", {
+    canvasWidth: width,
+    canvasCenterX: width / 2,
+    maxTextWidth,
+    finalFontSize: size,
+    lines: lines.map((l) => ({
+      text: l,
+      measuredWidth: ctx.measureText(l).width,
+      // If textAlign="center" draws correctly, the line's left/right edges
+      // should sit equidistant from canvasCenterX. A mismatch here versus
+      // what's visually seen would confirm whether this is a draw-time bug
+      // or something after the canvas (encode/player).
+      impliedLeftEdge: width / 2 - ctx.measureText(l).width / 2,
+      impliedRightEdge: width / 2 + ctx.measureText(l).width / 2,
+    })),
+  });
+
   return { size, lines, lineHeight, blockTop, strokeWidth: Math.max(6, Math.round(size * 0.18)) };
 }
 
