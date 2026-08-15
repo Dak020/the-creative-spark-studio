@@ -64,6 +64,8 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
             <Link
               key={item.url}
               to={item.url}
+              onClick={onNavigate}
+
               className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                 active
                   ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
