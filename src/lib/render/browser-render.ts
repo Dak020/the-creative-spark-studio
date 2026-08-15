@@ -287,7 +287,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   video.pause();
   recorder.stop();
   await stopped;
-  stream.getTracks().forEach((t) => t.stop());
+  captureStreamToUse.getTracks().forEach((t) => t.stop());
+  if (captureStreamToUse !== stream) stream.getTracks().forEach((t) => t.stop());
+
   video.src = "";
 
   const blob = new Blob(chunks, { type: mimeType });
