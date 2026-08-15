@@ -110,7 +110,7 @@ function StudioPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from("media_assets")
-        .select("id, filename, storage_path, duration, created_at")
+        .select("id, filename, storage_path, duration, hook_placement, created_at")
         .order("created_at", { ascending: false })
         .limit(12);
       return data ?? [];
@@ -366,6 +366,7 @@ function StudioPage() {
           filename: asset.filename,
           duration: asset.duration,
           storage_path: asset.storage_path,
+          hook_placement: asset.hook_placement,
         },
         assetUrl,
         hooks: chosen,
