@@ -89,7 +89,15 @@ function layoutOverlay(
   placement: HookPlacement,
 ) {
   const zone = SAFE_ZONES[placement];
-  const maxTextWidth = Math.round(width * zone.width);
+  // Leave real headroom below the nominal max width/height instead of running
+  // flush against the limit. Font metrics for the same font string can differ
+  // by a pixel or two across browsers/GPUs/font-rendering backends, so a wrap
+  // decision that just barely fits in one environment can just barely NOT fit
+  // in another — producing a different line count/break for identical input
+  // text. A consistent margin means small measurement variance never flips
+  // the outcome.
+  const WIDTH_MARGIN = 0.94;
+  const maxTextWidth = Math.round(width * zone.width * WIDTH_MARGIN);
   const zoneTop = Math.round(height * zone.top);
   const zoneBottom = Math.round(height * zone.bottom);
   const maxBlockHeight = zoneBottom - zoneTop;
@@ -247,10 +255,16 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     ctx!.lineWidth = overlay.strokeWidth;
     ctx!.strokeStyle = "#000000";
     ctx!.fillStyle = "#FFFFFF";
+    // Hard backstop: pass maxWidth so the canvas itself compresses a line
+    // rather than letting it paint past the frame, if it's ever wider than
+    // expected (e.g. a font-metric difference the wrap step didn't catch).
+    // Sized to the full canvas minus a safety inset, not the tighter
+    // safe-zone width, so this only ever engages as a last resort.
+    const hardMaxWidth = width - 40;
     overlay.lines.forEach((line, i) => {
       const y = overlay.blockTop + i * overlay.lineHeight + overlay.lineHeight / 2;
-      ctx!.strokeText(line, width / 2, y);
-      ctx!.fillText(line, width / 2, y);
+      ctx!.strokeText(line, width / 2, y, hardMaxWidth);
+      ctx!.fillText(line, width / 2, y, hardMaxWidth);
     });
     if (manualFrames) track!.requestFrame();
   }
