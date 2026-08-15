@@ -79,8 +79,11 @@ function AuthPage() {
 
   async function google() {
     setBusy(true);
+    // Return to this public sign-in route (not a protected page): the
+    // onAuthStateChange listener above forwards to the dashboard once the
+    // session is hydrated.
     const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
+      redirect_uri: `${window.location.origin}/auth`,
     });
     if (result.error) {
       setBusy(false);
@@ -88,8 +91,11 @@ function AuthPage() {
       return;
     }
     if (result.redirected) return;
-    navigate({ to: "/dashboard" });
+    const { data } = await supabase.auth.getSession();
+    if (data.session) navigate({ to: "/dashboard", replace: true });
+    else setBusy(false);
   }
+
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
