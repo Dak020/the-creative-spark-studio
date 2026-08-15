@@ -142,6 +142,26 @@ function waitFor(el: HTMLVideoElement, event: string) {
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
   const { sourceUrl, durationSeconds, width, height, text } = opts;
 
+  // layoutOverlay measures text to decide wrapping and font size, and
+  // drawFrame paints with the same font string — but if the "Inter" webfont
+  // hasn't actually finished loading yet, the canvas silently measures with
+  // a narrower fallback font while still painting with the real (wider,
+  // heavier) one once it loads. That mismatch lets a word fit during
+  // wrapping that no longer fits once actually drawn, so the last line can
+  // end up wider than intended and push off-center toward the right edge.
+  // Loading the exact weight/family string used for rendering first, and
+  // waiting on `document.fonts.ready`, guarantees measurement and drawing
+  // both use the real metrics.
+  try {
+    if (typeof document !== "undefined" && "fonts" in document) {
+      await document.fonts.load(fontFor(64));
+      await document.fonts.ready;
+    }
+  } catch {
+    // If font loading APIs aren't available/throw, fall back to whatever
+    // font is already resolved rather than blocking the render.
+  }
+
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = true;
