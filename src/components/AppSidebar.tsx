@@ -26,7 +26,7 @@ const items = [
   { title: "Settings", url: "/settings", icon: Settings },
 ] as const;
 
-export function AppSidebar() {
+export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -36,6 +36,7 @@ export function AppSidebar() {
   async function signOut() {
     // Drop every cached row before the session goes away so the next account
     // never sees the previous user's projects, media, hooks or renders.
+    onNavigate?.();
     await qc.cancelQueries();
     qc.clear();
     await supabase.auth.signOut();
@@ -44,7 +45,8 @@ export function AppSidebar() {
 
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[248px] shrink-0 flex-col border-r border-border bg-sidebar">
+    <aside className="sticky top-0 flex h-screen w-[248px] max-w-full shrink-0 flex-col border-r border-border bg-sidebar">
+
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div className="flex size-8 items-center justify-center rounded-lg bg-primary">
           <Clapperboard className="size-4 text-primary-foreground" />
@@ -62,6 +64,8 @@ export function AppSidebar() {
             <Link
               key={item.url}
               to={item.url}
+              onClick={onNavigate}
+
               className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                 active
                   ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"

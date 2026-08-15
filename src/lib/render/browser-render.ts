@@ -169,8 +169,17 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
 
   const mimeType = pickMimeType();
   const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
-  const stream = canvas.captureStream(30);
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
+
+  // Manual-frame capture: the canvas emits a frame only when we ask for one,
+  // and every emitted frame is timestamped at real wall-clock time. With the
+  // old fixed-rate captureStream(30) a slow 1080x1920 draw loop produced far
+  // fewer than 30 fps while the muxer still assumed 30 fps, so the whole clip
+  // was packed into a short, sped-up file (a 7s source came out ~2s).
+  const stream = canvas.captureStream(0);
+  const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+  const manualFrames = typeof track?.requestFrame === "function";
+  const captureStreamToUse = manualFrames ? stream : canvas.captureStream(30);
+  const recorder = new MediaRecorder(captureStreamToUse, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data);
@@ -206,6 +215,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       ctx!.strokeText(line, width / 2, y);
       ctx!.fillText(line, width / 2, y);
     });
+    if (manualFrames) track!.requestFrame();
   }
 
 
@@ -224,12 +234,25 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     }
   });
 
+  // Freeze the source while the recorder opens so the footage consumed during
+  // the decode wait isn't lost: recording then starts on the exact frame we
+  // stopped on, with no blank beat and no missing head of the clip.
+  video.pause();
   drawFrame();
   recorder.start(200);
-
   const startedAt = performance.now();
+  await video.play();
+
   await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      resolve();
+    };
     const tick = () => {
+      if (done) return;
       // When the source runs out we keep drawing its final frame so the export
       // is always exactly `durationSeconds` long.
       if (video.ended || video.currentTime >= start + durationSeconds - 0.03) {
@@ -238,14 +261,19 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       drawFrame();
       const elapsed = (performance.now() - startedAt) / 1000;
       opts.onProgress?.(Math.min(99, Math.round((elapsed / durationSeconds) * 100)));
-      if (elapsed >= durationSeconds) {
-        resolve();
-        return;
-      }
-      requestAnimationFrame(tick);
+      if (elapsed >= durationSeconds) finish();
     };
-    requestAnimationFrame(tick);
+    // setInterval keeps the capture cadence alive even when rAF is throttled
+    // (background tab / hidden preview), so the recording never stalls short.
+    const timer = setInterval(tick, 1000 / 30);
+    const raf = () => {
+      if (done) return;
+      tick();
+      requestAnimationFrame(raf);
+    };
+    requestAnimationFrame(raf);
   });
+
 
   // Poster frame (with the overlay already composited) for the result card.
   const thumbnail = await new Promise<Blob | null>((resolve) => {
@@ -259,7 +287,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   video.pause();
   recorder.stop();
   await stopped;
-  stream.getTracks().forEach((t) => t.stop());
+  captureStreamToUse.getTracks().forEach((t) => t.stop());
+  if (captureStreamToUse !== stream) stream.getTracks().forEach((t) => t.stop());
+
   video.src = "";
 
   const blob = new Blob(chunks, { type: mimeType });

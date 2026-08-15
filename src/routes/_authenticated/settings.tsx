@@ -24,7 +24,8 @@ function SettingsPage() {
   const navigate = useNavigate();
 
   const { data: counts } = useQuery({
-    queryKey: ["settings-counts"],
+    queryKey: ["settings-counts", user?.id],
+    enabled: !!user?.id,
     queryFn: async () => {
       const [projects, media, hooks, videos] = await Promise.all([
         supabase.from("projects").select("id"),
@@ -40,6 +41,45 @@ function SettingsPage() {
       };
     },
   });
+
+  // Real storage usage: walk this user's folder in both buckets and add up the
+  // object sizes reported by Storage.
+  const { data: storage, isLoading: storageLoading } = useQuery({
+    queryKey: ["settings-storage", user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      async function bucketUsage(bucket: string) {
+        let offset = 0;
+        let bytes = 0;
+        let files = 0;
+        let thumbBytes = 0;
+        for (;;) {
+          const { data, error } = await supabase.storage
+            .from(bucket)
+            .list(user!.id, { limit: 100, offset });
+          if (error || !data?.length) break;
+          for (const obj of data) {
+            const size = Number((obj.metadata as { size?: number } | null)?.size ?? 0);
+            const isThumb = obj.name.endsWith(".jpg") || obj.name.endsWith(".jpeg");
+            if (isThumb) thumbBytes += size;
+            else {
+              bytes += size;
+              files += 1;
+            }
+          }
+          if (data.length < 100) break;
+          offset += 100;
+        }
+        return { bytes, files, thumbBytes };
+      }
+      const [media, renders] = await Promise.all([bucketUsage("media"), bucketUsage("renders")]);
+      return { media, renders, total: media.bytes + media.thumbBytes + renders.bytes + renders.thumbBytes };
+    },
+  });
+
+  const quota = 1024 * 1024 * 1024; // 1 GB soft workspace capacity
+  const usedPct = storage ? Math.min(100, Math.round((storage.total / quota) * 100)) : 0;
+
 
   return (
     <div className="space-y-8">
@@ -75,6 +115,35 @@ function SettingsPage() {
               <div key={String(label)}>
                 <dt className="text-xs text-muted-foreground">{label}</dt>
                 <dd className="font-display text-xl font-semibold tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section className="panel space-y-4 p-6 lg:col-span-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Storage</h2>
+            <p className="text-xs text-muted-foreground">
+              {storageLoading ? "Reading usage…" : `${formatBytes(storage?.total ?? 0)} of ${formatBytes(quota)} used`}
+            </p>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-surface-raised">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${usedPct}%` }} />
+          </div>
+          <dl className="grid gap-4 sm:grid-cols-3">
+            {[
+              ["Source clips", storage?.media.bytes ?? 0, `${storage?.media.files ?? 0} files`],
+              ["Generated renders", storage?.renders.bytes ?? 0, `${storage?.renders.files ?? 0} files`],
+              [
+                "Thumbnails",
+                (storage?.media.thumbBytes ?? 0) + (storage?.renders.thumbBytes ?? 0),
+                "posters",
+              ],
+            ].map(([label, bytes, sub]) => (
+              <div key={String(label)}>
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="font-display text-xl font-semibold tabular-nums">{formatBytes(Number(bytes))}</dd>
+                <p className="text-[11px] text-muted-foreground">{sub}</p>
               </div>
             ))}
           </dl>
