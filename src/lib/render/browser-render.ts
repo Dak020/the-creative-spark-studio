@@ -260,41 +260,21 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     ctx!.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh);
 
     // Burn the hook in on every single frame: heavy white type, hard black
-    // outline, one cohesive centered block — no background box.
+    // outline, one cohesive block, every line sharing one center axis.
     ctx!.font = font;
     ctx!.textBaseline = "middle";
-    ctx!.textAlign = "center";
+    ctx!.textAlign = "left";
     ctx!.lineJoin = "round";
     ctx!.miterLimit = 2;
     ctx!.lineWidth = overlay.strokeWidth;
     ctx!.strokeStyle = "#000000";
     ctx!.fillStyle = "#FFFFFF";
-    // Do NOT rely on canvas's built-in fillText/strokeText `maxWidth`
-    // parameter as a safety net: combined with textAlign="center", browsers
-    // are inconsistent about HOW they compress an over-width line — some
-    // effectively left-align it instead of compressing around the center
-    // point, which produced exactly this bug (a line whose left edge sat
-    // near canvas-center and right edge ran off the frame). Instead, verify
-    // the real drawn width ourselves, in JS, against the exact same font
-    // that's about to paint, and shrink further if it's still too wide. This
-    // never depends on a browser-specific compression behavior.
-    const hardMaxWidth = width - 40;
-    let drawFont = font;
-    ctx!.font = drawFont;
-    let drawSize = overlay.size;
-    let widestActual = Math.max(...overlay.lines.map((l) => ctx!.measureText(l).width), 0);
-    while (widestActual > hardMaxWidth && drawSize > 20) {
-      drawSize -= 2;
-      drawFont = fontFor(drawSize);
-      ctx!.font = drawFont;
-      widestActual = Math.max(...overlay.lines.map((l) => ctx!.measureText(l).width), 0);
-    }
-    const drawLineHeight = Math.round(drawSize * 1.16);
-    overlay.lines.forEach((line, i) => {
+    drawLines.forEach((line, i) => {
       const y = overlay.blockTop + i * drawLineHeight + drawLineHeight / 2;
-      ctx!.strokeText(line, width / 2, y);
-      ctx!.fillText(line, width / 2, y);
+      ctx!.strokeText(line.text, line.x, y);
+      ctx!.fillText(line.text, line.x, y);
     });
+
     if (manualFrames) track!.requestFrame();
   }
 
