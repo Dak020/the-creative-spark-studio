@@ -194,7 +194,37 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   if (!ctx) throw new Error("Canvas is not available in this browser.");
 
   const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.placement ?? "top");
-  const font = fontFor(overlay.size);
+
+  // Resolve the final draw font ONCE (not per frame) and anchor every line to
+  // the same fixed center X of the block.
+  //
+  // Why not textAlign="center": canvas centers a line on its *advance width*.
+  // For lines containing emoji / ZWJ sequences (and some fallback-font glyphs)
+  // the painted ink is not symmetric around the advance box, so such a line —
+  // typically the short final one — ends up visibly offset from the lines
+  // above. Measuring the ink box (actualBoundingBoxLeft/Right) and drawing
+  // left-aligned at an x derived from the SAME centerX makes every line share
+  // one center axis regardless of its glyphs or width.
+  const centerX = Math.round(width / 2);
+  const hardMaxWidth = width - 40;
+  let drawSize = overlay.size;
+  let font = fontFor(drawSize);
+  ctx.font = font;
+  while (Math.max(...overlay.lines.map((l) => ctx.measureText(l).width), 0) > hardMaxWidth && drawSize > 20) {
+    drawSize -= 2;
+    font = fontFor(drawSize);
+    ctx.font = font;
+  }
+  const drawLineHeight = Math.round(drawSize * 1.16);
+  const drawLines = overlay.lines.map((line) => {
+    const m = ctx.measureText(line);
+    const inkLeft = Number.isFinite(m.actualBoundingBoxLeft) ? m.actualBoundingBoxLeft : m.width / 2;
+    const inkRight = Number.isFinite(m.actualBoundingBoxRight) ? m.actualBoundingBoxRight : m.width / 2;
+    // Ink spans [-inkLeft, inkRight] around the draw origin; shift so the ink
+    // midpoint lands exactly on centerX.
+    return { text: line, x: centerX - (inkRight - inkLeft) / 2 };
+  });
+
 
   const mimeType = pickMimeType();
   const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
