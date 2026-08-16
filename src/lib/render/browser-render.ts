@@ -365,8 +365,12 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   });
 
   video.pause();
+  // Flush whatever is buffered in the current timeslice so the tail of the
+  // clip isn't dropped with the final partial chunk.
+  if (recorder.state === "recording") recorder.requestData();
   recorder.stop();
   await stopped;
+
   captureStreamToUse.getTracks().forEach((t) => t.stop());
   if (captureStreamToUse !== stream) stream.getTracks().forEach((t) => t.stop());
 
