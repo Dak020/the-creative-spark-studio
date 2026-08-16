@@ -303,8 +303,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const startedAt = performance.now();
   await video.play();
 
-  console.log("[render-debug] loop-start", { start, durationSeconds, videoDuration: video.duration });
-  let fallbackFireCount = 0;
   await new Promise<void>((resolve) => {
     let done = false;
     let lastRafAt = performance.now();
@@ -312,14 +310,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       if (done) return;
       done = true;
       clearInterval(timer);
-      console.log("[render-debug] loop-end", {
-        fallbackFireCount,
-        finalCurrentTime: video.currentTime,
-        videoEnded: video.ended,
-        elapsedMs: performance.now() - startedAt,
-      });
       resolve();
     };
+
     const tick = () => {
       if (done) return;
       // When the source runs out we keep drawing its final frame so the export
