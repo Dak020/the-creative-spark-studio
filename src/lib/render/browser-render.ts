@@ -333,7 +333,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     const timer = setInterval(() => {
       if (done) return;
       if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) {
-        fallbackFireCount++;
         tick();
       }
     }, 1000 / 30);
