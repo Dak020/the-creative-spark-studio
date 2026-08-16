@@ -294,14 +294,23 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     }
   });
 
-  // Freeze the source while the recorder opens so the footage consumed during
-  // the decode wait isn't lost: recording then starts on the exact frame we
-  // stopped on, with no blank beat and no missing head of the clip.
+  // Playback keeps running while we wait for that first decoded frame, so by
+  // now `currentTime` has drifted past `start` (often several hundred ms).
+  // Recording from there both loses the head of the clip AND makes the media
+  // hit its end-of-range before the wall-clock budget is spent — a 7s source
+  // came out ~6s. Rewind to the exact start offset before opening the
+  // recorder: the decoder is warm, so this seek is instant and the first
+  // recorded frame is real footage at t=0 of the range.
   video.pause();
+  if (Math.abs(video.currentTime - start) > 0.005) {
+    video.currentTime = start;
+    await waitFor(video, "seeked");
+  }
   drawFrame();
   recorder.start(200);
   const startedAt = performance.now();
   await video.play();
+
 
   await new Promise<void>((resolve) => {
     let done = false;
@@ -356,8 +365,12 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   });
 
   video.pause();
+  // Flush whatever is buffered in the current timeslice so the tail of the
+  // clip isn't dropped with the final partial chunk.
+  if (recorder.state === "recording") recorder.requestData();
   recorder.stop();
   await stopped;
+
   captureStreamToUse.getTracks().forEach((t) => t.stop());
   if (captureStreamToUse !== stream) stream.getTracks().forEach((t) => t.stop());
 
