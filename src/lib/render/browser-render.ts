@@ -124,25 +124,9 @@ function layoutOverlay(
   // Center the block vertically inside its own zone; never overflow it.
   const blockTop = Math.max(zoneTop, zoneTop + Math.round((maxBlockHeight - blockHeight) / 2));
 
-  console.log("[overlay-debug]", {
-    canvasWidth: width,
-    canvasCenterX: width / 2,
-    maxTextWidth,
-    finalFontSize: size,
-    lines: lines.map((l) => ({
-      text: l,
-      measuredWidth: ctx.measureText(l).width,
-      // If textAlign="center" draws correctly, the line's left/right edges
-      // should sit equidistant from canvasCenterX. A mismatch here versus
-      // what's visually seen would confirm whether this is a draw-time bug
-      // or something after the canvas (encode/player).
-      impliedLeftEdge: width / 2 - ctx.measureText(l).width / 2,
-      impliedRightEdge: width / 2 + ctx.measureText(l).width / 2,
-    })),
-  });
-
   return { size, lines, lineHeight, blockTop, strokeWidth: Math.max(6, Math.round(size * 0.18)) };
 }
+
 
 function waitFor(el: HTMLVideoElement, event: string) {
   return new Promise<void>((resolve, reject) => {
@@ -210,7 +194,37 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   if (!ctx) throw new Error("Canvas is not available in this browser.");
 
   const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.placement ?? "top");
-  const font = fontFor(overlay.size);
+
+  // Resolve the final draw font ONCE (not per frame) and anchor every line to
+  // the same fixed center X of the block.
+  //
+  // Why not textAlign="center": canvas centers a line on its *advance width*.
+  // For lines containing emoji / ZWJ sequences (and some fallback-font glyphs)
+  // the painted ink is not symmetric around the advance box, so such a line —
+  // typically the short final one — ends up visibly offset from the lines
+  // above. Measuring the ink box (actualBoundingBoxLeft/Right) and drawing
+  // left-aligned at an x derived from the SAME centerX makes every line share
+  // one center axis regardless of its glyphs or width.
+  const centerX = Math.round(width / 2);
+  const hardMaxWidth = width - 40;
+  let drawSize = overlay.size;
+  let font = fontFor(drawSize);
+  ctx.font = font;
+  while (Math.max(...overlay.lines.map((l) => ctx.measureText(l).width), 0) > hardMaxWidth && drawSize > 20) {
+    drawSize -= 2;
+    font = fontFor(drawSize);
+    ctx.font = font;
+  }
+  const drawLineHeight = Math.round(drawSize * 1.16);
+  const drawLines = overlay.lines.map((line) => {
+    const m = ctx.measureText(line);
+    const inkLeft = Number.isFinite(m.actualBoundingBoxLeft) ? m.actualBoundingBoxLeft : m.width / 2;
+    const inkRight = Number.isFinite(m.actualBoundingBoxRight) ? m.actualBoundingBoxRight : m.width / 2;
+    // Ink spans [-inkLeft, inkRight] around the draw origin; shift so the ink
+    // midpoint lands exactly on centerX.
+    return { text: line, x: centerX - (inkRight - inkLeft) / 2 };
+  });
+
 
   const mimeType = pickMimeType();
   const extension = mimeType.startsWith("video/mp4") ? "mp4" : "webm";
@@ -246,41 +260,21 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     ctx!.drawImage(video, (width - dw) / 2, (height - dh) / 2, dw, dh);
 
     // Burn the hook in on every single frame: heavy white type, hard black
-    // outline, one cohesive centered block — no background box.
+    // outline, one cohesive block, every line sharing one center axis.
     ctx!.font = font;
     ctx!.textBaseline = "middle";
-    ctx!.textAlign = "center";
+    ctx!.textAlign = "left";
     ctx!.lineJoin = "round";
     ctx!.miterLimit = 2;
     ctx!.lineWidth = overlay.strokeWidth;
     ctx!.strokeStyle = "#000000";
     ctx!.fillStyle = "#FFFFFF";
-    // Do NOT rely on canvas's built-in fillText/strokeText `maxWidth`
-    // parameter as a safety net: combined with textAlign="center", browsers
-    // are inconsistent about HOW they compress an over-width line — some
-    // effectively left-align it instead of compressing around the center
-    // point, which produced exactly this bug (a line whose left edge sat
-    // near canvas-center and right edge ran off the frame). Instead, verify
-    // the real drawn width ourselves, in JS, against the exact same font
-    // that's about to paint, and shrink further if it's still too wide. This
-    // never depends on a browser-specific compression behavior.
-    const hardMaxWidth = width - 40;
-    let drawFont = font;
-    ctx!.font = drawFont;
-    let drawSize = overlay.size;
-    let widestActual = Math.max(...overlay.lines.map((l) => ctx!.measureText(l).width), 0);
-    while (widestActual > hardMaxWidth && drawSize > 20) {
-      drawSize -= 2;
-      drawFont = fontFor(drawSize);
-      ctx!.font = drawFont;
-      widestActual = Math.max(...overlay.lines.map((l) => ctx!.measureText(l).width), 0);
-    }
-    const drawLineHeight = Math.round(drawSize * 1.16);
-    overlay.lines.forEach((line, i) => {
+    drawLines.forEach((line, i) => {
       const y = overlay.blockTop + i * drawLineHeight + drawLineHeight / 2;
-      ctx!.strokeText(line, width / 2, y);
-      ctx!.fillText(line, width / 2, y);
+      ctx!.strokeText(line.text, line.x, y);
+      ctx!.fillText(line.text, line.x, y);
     });
+
     if (manualFrames) track!.requestFrame();
   }
 
@@ -309,8 +303,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const startedAt = performance.now();
   await video.play();
 
-  console.log("[render-debug] loop-start", { start, durationSeconds, videoDuration: video.duration });
-  let fallbackFireCount = 0;
   await new Promise<void>((resolve) => {
     let done = false;
     let lastRafAt = performance.now();
@@ -318,14 +310,9 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       if (done) return;
       done = true;
       clearInterval(timer);
-      console.log("[render-debug] loop-end", {
-        fallbackFireCount,
-        finalCurrentTime: video.currentTime,
-        videoEnded: video.ended,
-        elapsedMs: performance.now() - startedAt,
-      });
       resolve();
     };
+
     const tick = () => {
       if (done) return;
       // When the source runs out we keep drawing its final frame so the export
@@ -346,7 +333,6 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
     const timer = setInterval(() => {
       if (done) return;
       if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) {
-        fallbackFireCount++;
         tick();
       }
     }, 1000 / 30);
