@@ -21,12 +21,12 @@ function AppLayout() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
 
   return (
-    <div className="flex min-h-screen w-full overflow-x-hidden bg-background">
+    <div className="flex h-screen w-full overflow-x-hidden bg-background">
       <div className="hidden lg:block">
         <AppSidebar />
       </div>
 
-      <main className="min-w-0 flex-1">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         {/* Mobile navigation: the sidebar is hidden below lg, so give phones a
             header with a drawer holding the exact same nav. */}
         <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur lg:hidden">
