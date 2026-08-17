@@ -104,28 +104,59 @@ function StudioPage() {
 
 
 
-  const { data: assets } = useQuery({
-    queryKey: ["studio-assets", user?.id ?? "anon"],
+  // Studio can scope itself to a specific project's own media and hooks —
+  // pick one from this selector, same idea as the Project page already
+  // uses. With nothing selected, Studio keeps its original behavior: the
+  // single hidden "Studio" catch-all project used for quick, unsorted work.
+  const [scopeProjectId, setScopeProjectId] = useState<string | null>(null);
+
+  const { data: userProjects } = useQuery({
+    queryKey: ["studio-projects", user?.id ?? "anon"],
     enabled: Boolean(user),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("projects")
+        .select("id, name")
+        .neq("name", "Studio")
+        .order("created_at", { ascending: false });
+      return data ?? [];
+    },
+  });
+
+  const { data: defaultStudioProjectId } = useQuery({
+    queryKey: ["studio-default-project", user?.id ?? "anon"],
+    enabled: Boolean(user),
+    staleTime: 60_000,
+    queryFn: async () => (user ? ensureStudioProject(user.id) : null),
+  });
+
+  const effectiveProjectId = scopeProjectId ?? defaultStudioProjectId ?? null;
+
+  const { data: assets } = useQuery({
+    queryKey: ["studio-assets", user?.id ?? "anon", effectiveProjectId],
+    enabled: Boolean(user) && Boolean(effectiveProjectId),
     staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("media_assets")
-        .select("id, filename, storage_path, duration, hook_placement, created_at")
+        .select("id, filename, storage_path, duration, hook_placement, created_at, project_id")
+        .eq("project_id", effectiveProjectId as string)
         .order("created_at", { ascending: false })
-        .limit(12);
+        .limit(100);
       return data ?? [];
     },
   });
 
   const { data: hooks } = useQuery({
-    queryKey: ["studio-hooks", user?.id ?? "anon"],
-    enabled: Boolean(user),
+    queryKey: ["studio-hooks", user?.id ?? "anon", effectiveProjectId],
+    enabled: Boolean(user) && Boolean(effectiveProjectId),
     staleTime: 15_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("hooks")
         .select("id, text, category, notes, is_winner, created_at")
+        .eq("project_id", effectiveProjectId as string)
         .order("created_at", { ascending: false })
         .limit(50);
       return data ?? [];
@@ -256,7 +287,7 @@ function StudioPage() {
       }
       setUploading(true);
       try {
-        const projectId = await ensureStudioProject(user.id);
+        const projectId = effectiveProjectId ?? (await ensureStudioProject(user.id));
         if (!projectId) throw new Error("Could not prepare the studio project.");
         const meta = await withTimeout(probeVideo(file), 15000, {
           duration: 0,
@@ -314,7 +345,7 @@ function StudioPage() {
       return;
     }
     setSavingHook(true);
-    const projectId = await ensureStudioProject(user.id);
+    const projectId = effectiveProjectId ?? (await ensureStudioProject(user.id));
     const { error } = await supabase.from("hooks").insert({
       user_id: user.id,
       project_id: projectId,
@@ -359,7 +390,7 @@ function StudioPage() {
       .filter((h): h is NonNullable<typeof h> => Boolean(h))
       .map((h) => ({ id: h.id, text: h.text }));
 
-    const projectId = await ensureStudioProject(user.id);
+    const projectId = effectiveProjectId ?? (await ensureStudioProject(user.id));
     if (!projectId) {
       toast.error("Could not prepare the studio project.");
       return;
@@ -483,6 +514,29 @@ function StudioPage() {
         title="Studio"
         description="Upload one clip, select your hooks, choose how many variants to render, and export ready-to-post vertical videos."
       />
+
+      <div className="panel flex flex-wrap items-center gap-3 p-4">
+        <Label className="text-xs whitespace-nowrap">Working in</Label>
+        <Select
+          value={scopeProjectId ?? "__default__"}
+          onValueChange={(v) => setScopeProjectId(v === "__default__" ? null : v)}
+        >
+          <SelectTrigger className="w-full max-w-xs">
+            <SelectValue placeholder="Quick Studio work" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default__">Quick Studio work (unsorted)</SelectItem>
+            {(userProjects ?? []).map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Clips, hooks, and renders you add here go into this project — switch to see or work on a different one.
+        </p>
+      </div>
 
       {/* 1. Source video */}
       <section className="panel p-5">
