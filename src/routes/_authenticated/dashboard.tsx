@@ -82,7 +82,7 @@ function Dashboard() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Projects"
           value={data?.projects.length ?? 0}
@@ -105,8 +105,8 @@ function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <section className="space-y-3">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Recent projects
@@ -135,7 +135,7 @@ function Dashboard() {
               }
             />
           ) : (
-            <div className="panel divide-y divide-border overflow-hidden">
+            <div className="panel min-w-0 divide-y divide-border overflow-hidden">
               {data?.projects.map((p) => (
                 <Link
                   key={p.id}
@@ -159,7 +159,7 @@ function Dashboard() {
           )}
         </section>
 
-        <section className="space-y-3">
+        <section className="min-w-0 space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Active render jobs
           </h2>
@@ -172,7 +172,7 @@ function Dashboard() {
               </p>
             </div>
           ) : (
-            <div className="panel divide-y divide-border overflow-hidden">
+            <div className="panel min-w-0 divide-y divide-border overflow-hidden">
               {data?.jobs.map((j) => (
                 <div key={j.id} className="px-5 py-4">
                   <div className="flex items-center justify-between gap-3">
@@ -195,13 +195,13 @@ function Dashboard() {
               No rendered videos yet.
             </div>
           ) : (
-            <div className="panel divide-y divide-border overflow-hidden">
+            <div className="panel min-w-0 divide-y divide-border overflow-hidden">
               {data?.videos.map((v) => (
                 <Link
                   key={v.id}
                   to="/projects/$projectId"
                   params={{ projectId: v.project_id }}
-                  className="block px-5 py-3 transition-colors hover:bg-surface-raised"
+                  className="block min-w-0 px-5 py-3 transition-colors hover:bg-surface-raised"
                 >
                   <p className="truncate text-sm">{v.hook_text ?? "Untitled"}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
