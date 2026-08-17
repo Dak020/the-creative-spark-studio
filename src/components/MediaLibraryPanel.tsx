@@ -168,6 +168,20 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
     },
   });
 
+  // Only needed on the unscoped Media Library view — inside a specific
+  // project's own Media Library every clip already belongs to that one
+  // project, so a per-card tag would just repeat what the page is already
+  // showing.
+  const { data: projectNames } = useQuery({
+    queryKey: ["media-project-names"],
+    enabled: !projectId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await supabase.from("projects").select("id, name");
+      return new Map((data ?? []).map((p) => [p.id, p.name]));
+    },
+  });
+
   const filtered = useMemo(() => {
     const list = assets ?? [];
     return list.filter((a) => {
@@ -582,6 +596,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   <Badge className="text-[10px]">
                     Hook: {hookPlacementLabel(asset.hook_placement)}
                   </Badge>
+                  {projectNames && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {asset.project_id ? (projectNames.get(asset.project_id) ?? "Unknown project") : "Unsorted"}
+                    </Badge>
+                  )}
                   {asset.tags.slice(0, 2).map((t) => (
                     <Badge key={t} variant="outline" className="text-[10px]">
                       {t}
