@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AuthPage } from "@/components/auth-page";
 
-// Catch-all under /auth (e.g. /auth/callback) so an OAuth provider redirecting
-// to a sub-path completes sign-in instead of hitting the 404 page.
-export const Route = createFileRoute("/auth/$")({
+// Some OAuth configurations return to /auth/callback; render the same sign-in
+// screen there so the session hydrates instead of hitting the 404 page.
+export const Route = createFileRoute("/auth/callback")({
   ssr: false,
   head: () => ({
     meta: [
