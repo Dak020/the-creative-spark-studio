@@ -1,767 +1,557 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { Download, Film, Loader2, Plus, Trophy, Upload, Wand2 } from "lucide-react";
+/**
+ * Shared client-side production pipeline.
+ *
+ *   source clip + hook -> video_recipes -> render_jobs -> browser render
+ *   -> storage upload -> verified signed URL -> generated_videos
+ *
+ * A variant is only ever reported (and stored) as `completed` when the output
+ * object actually exists in storage and resolves to a playable signed URL.
+ */
+
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import { EmptyState, PageHeader, StatusPill } from "@/components/ui-kit";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { HOOK_CATEGORIES } from "@/lib/constants";
-import { videoExtension, videoFileError, withTimeout } from "@/lib/video-file";
-import { fmtDate, fmtDuration, signedUrl } from "@/lib/db";
-import {
-  CLIP_SECONDS,
-  OUT_H,
-  OUT_W,
-  STAGE_LABEL,
-  reapStaleJobs,
-  runBatch,
-  type BatchItem,
-} from "@/lib/render/pipeline";
-import { deleteRender } from "@/lib/render/delete";
-import { DeleteRenderButton } from "@/components/DeleteRenderButton";
-import { RenderPlayer } from "@/components/RenderPlayer";
-import { downloadRender, renderFilename, resolveRenderUrl } from "@/lib/render/output";
+import { planStartOffsets, renderVariant, type HookPlacement } from "./browser-render";
+import { resolveRenderUrl } from "./output";
+
+export const RENDER_BUCKET = "renders";
+export const CLIP_SECONDS = 8;
+export const OUT_W = 1080;
+export const OUT_H = 1920;
+
+export type RenderStage =
+  | "queued"
+  | "rendering"
+  | "encoding"
+  | "uploading"
+  | "completed"
+  | "failed";
+
+export const STAGE_LABEL: Record<RenderStage, string> = {
+  queued: "Queued",
+  rendering: "Rendering",
+  encoding: "Encoding",
+  uploading: "Uploading",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+export type BatchItem = {
+  jobId: string;
+  recipeId: string | null;
+  videoId: string | null;
+  hookId: string;
+  hookText: string;
+  sourceName: string;
+  sourceAssetId: string;
+  durationSeconds: number;
+  createdAt: string;
+  outputPath: string | null;
+  thumbnailPath: string | null;
+  stage: RenderStage;
+  progress: number;
+  url?: string;
+  filename?: string;
+  error?: string;
+};
+
+export type BatchInput = {
+  userId: string;
+  projectId: string;
+  asset: {
+    id: string;
+    filename: string;
+    duration: number | null;
+    storage_path: string;
+    hook_placement?: string | null;
+  };
+  assetUrl: string;
+  hooks: { id: string; text: string }[];
+  quantity: number;
+  onUpdate: (items: BatchItem[]) => void;
+};
 
 
-const QUANTITY_PRESETS = [1, 5, 10, 20, 30] as const;
-const MAX_HOOKS = 10;
-const MAX_QUANTITY = 30;
+/**
+ * Round-robin the selected hooks across the requested number of variants, so
+ * the user gets exactly the quantity they asked for — never more, never fewer.
+ */
+export function planVariants(hooks: { id: string; text: string }[], quantity: number) {
+  if (hooks.length === 0) return [];
+  return Array.from({ length: Math.max(1, quantity) }, (_, i) => hooks[i % hooks.length]!);
+}
 
-export const Route = createFileRoute("/_authenticated/studio")({
-  head: () => ({
-    meta: [
-      { title: "Studio — Creative Factory" },
-      {
-        name: "description",
-        content:
-          "Upload one clip, pick your winning hooks, choose a batch size and render vertical videos with the hook burned in.",
-      },
-      { property: "og:title", content: "Studio — Creative Factory" },
-      {
-        property: "og:description",
-        content: "The complete upload, hook selection, batch render, download and cleanup workflow.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: StudioPage,
-});
-
-type ResultCard = BatchItem & { videoId: string | null };
-
-function StudioPage() {
-  const { user } = useAuth();
-  const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const [uploading, setUploading] = useState(false);
-  const [assetId, setAssetId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [live, setLive] = useState<BatchItem[]>([]);
-  const [rendering, setRendering] = useState(false);
-  const [requested, setRequested] = useState(0);
-
-  const [quantityChoice, setQuantityChoice] = useState<string>("5");
-  const [customQuantity, setCustomQuantity] = useState("8");
-
-  const [text, setText] = useState("");
-  const [category, setCategory] = useState<string>(HOOK_CATEGORIES[0]);
-  const [notes, setNotes] = useState("");
-  const [winner, setWinner] = useState(true);
-  const [savingHook, setSavingHook] = useState(false);
-
-  const quantity = useMemo(() => {
-    if (quantityChoice !== "custom") return Number(quantityChoice);
-    const n = Math.round(Number(customQuantity));
-    if (!Number.isFinite(n)) return 1;
-    return Math.min(MAX_QUANTITY, Math.max(1, n));
-  }, [quantityChoice, customQuantity]);
-
-  // Jobs abandoned by a closed tab must not linger as "in progress" after a refresh.
-  useEffect(() => {
-    if (!user) return;
-    void reapStaleJobs(user.id).then(() =>
-      qc.invalidateQueries({ queryKey: ["studio-results"] }),
-    );
-  }, [user?.id, qc]);
-
-
-
-  const { data: assets } = useQuery({
-    queryKey: ["studio-assets", user?.id ?? "anon"],
-    enabled: Boolean(user),
-    staleTime: 15_000,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("media_assets")
-        .select("id, filename, storage_path, duration, hook_placement, created_at")
-        .order("created_at", { ascending: false })
-        .limit(12);
-      return data ?? [];
-    },
-  });
-
-  const { data: hooks } = useQuery({
-    queryKey: ["studio-hooks", user?.id ?? "anon"],
-    enabled: Boolean(user),
-    staleTime: 15_000,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("hooks")
-        .select("id, text, category, notes, is_winner, created_at")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      return data ?? [];
-    },
-  });
-
-  // Persisted results, so everything survives a page reload.
-  const { data: pastResults } = useQuery({
-    queryKey: ["studio-results", user?.id ?? "anon"],
-    enabled: Boolean(user),
-    staleTime: 15_000,
-    queryFn: async (): Promise<ResultCard[]> => {
-
-      const [videos, failedJobs] = await Promise.all([
-        supabase
-          .from("generated_videos")
-          .select(
-            "id, hook_id, hook_text, output_url, thumbnail_url, duration, status, created_at, render_job_id, recipe_id, media_asset_id, media_assets(filename)",
-          )
-          .order("created_at", { ascending: false })
-          .limit(30),
-        supabase
-          .from("render_jobs")
-          .select("id, status, error_message, created_at, video_recipes(overlay_text, media_asset_id)")
-          .eq("status", "failed")
-          .order("created_at", { ascending: false })
-          .limit(12),
-      ]);
-
-      const done: ResultCard[] = await Promise.all(
-        (videos.data ?? []).map(async (r): Promise<ResultCard> => {
-          const url = await resolveRenderUrl(r.output_url);
-          const ok = Boolean(url) && r.status === "completed";
-          return {
-            jobId: r.render_job_id ?? r.id,
-            videoId: r.id,
-            recipeId: r.recipe_id,
-            hookId: r.hook_id ?? "",
-            hookText: r.hook_text ?? "Untitled hook",
-            sourceName: (r.media_assets as { filename?: string } | null)?.filename ?? "Source clip",
-            sourceAssetId: r.media_asset_id ?? "",
-            durationSeconds: Number(r.duration ?? CLIP_SECONDS),
-            createdAt: r.created_at,
-            outputPath: r.output_url,
-            thumbnailPath: r.thumbnail_url,
-            stage: ok ? "completed" : "failed",
-            progress: 100,
-            ...(url ? { url } : { error: "Output file is missing from storage." }),
-            filename: renderFilename(r.output_url, `hook-variant-${r.id.slice(0, 6)}`),
-          };
-        }),
-      );
-
-      const videoJobIds = new Set(done.map((d) => d.jobId));
-      const failed: ResultCard[] = (failedJobs.data ?? [])
-        .filter((j) => !videoJobIds.has(j.id))
-        .map((j) => ({
-          jobId: j.id,
-          videoId: null,
-          recipeId: null,
-          hookId: "",
-          hookText:
-            (j.video_recipes as { overlay_text?: string } | null)?.overlay_text ?? "Untitled hook",
-          sourceName: "Source clip",
-          sourceAssetId: (j.video_recipes as { media_asset_id?: string } | null)?.media_asset_id ?? "",
-          durationSeconds: CLIP_SECONDS,
-          createdAt: j.created_at,
-          outputPath: null,
-          thumbnailPath: null,
-          stage: "failed" as const,
-          progress: 100,
-          error: j.error_message ?? "Render failed.",
-        }));
-
-      return [...done, ...failed].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-    },
-  });
-
-  const liveIds = new Set(live.map((l) => l.jobId));
-  const results: ResultCard[] = [
-    ...live.map((l) => ({ ...l, videoId: l.videoId })),
-    ...(pastResults ?? []).filter((p) => !liveIds.has(p.jobId)),
-  ];
-
-  const completedCount = live.filter((l) => l.stage === "completed").length;
-  const failedItems = live.filter((l) => l.stage === "failed");
-
-  const asset = useMemo(
-    () => (assets ?? []).find((a) => a.id === assetId) ?? (assets ?? [])[0] ?? null,
-    [assets, assetId],
-  );
-
-  const [assetUrl, setAssetUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    if (!asset?.storage_path) {
-      setAssetUrl(null);
-      return;
-    }
-    signedUrl("media", asset.storage_path, 60 * 60 * 6).then((u) => {
-      if (active) setAssetUrl(u);
-    });
-    return () => {
-      active = false;
-    };
-  }, [asset?.storage_path]);
-
-  const onUpload = useCallback(
-    async (file: File) => {
-      if (!user) {
-        toast.error("You are signed out — sign in again to upload.");
-        return;
-      }
-      const invalid = videoFileError(file);
-      if (invalid) {
-        toast.error(invalid);
-        return;
-      }
-      setUploading(true);
-      try {
-        const projectId = await ensureStudioProject(user.id);
-        if (!projectId) throw new Error("Could not prepare the studio project.");
-        const meta = await withTimeout(probeVideo(file), 15000, {
-          duration: 0,
-          width: 0,
-          height: 0,
-        });
-        const ext = videoExtension(file);
-        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("media")
-          .upload(path, file, { contentType: file.type || "video/mp4", upsert: false });
-        if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
-
-        const { data, error } = await supabase
-          .from("media_assets")
-          .insert({
-            user_id: user.id,
-            project_id: projectId,
-            storage_path: path,
-            filename: file.name || `clip.${ext}`,
-            duration: meta.duration,
-            width: meta.width,
-            height: meta.height,
-            size_bytes: file.size,
-            category: "Other",
-          })
-          .select("id")
-          .single();
-        if (error || !data) {
-          await supabase.storage.from("media").remove([path]);
-          throw new Error(`Saving the clip failed: ${error?.message ?? "no record returned"}`);
-        }
-
-        setAssetId(data.id);
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ["studio-assets"] }),
-          qc.invalidateQueries({ queryKey: ["media"] }),
-          qc.invalidateQueries({ queryKey: ["project"] }),
-        ]);
-        toast.success("Source video uploaded");
-      } catch (e) {
-        toast.error((e as Error).message);
-      } finally {
-        setUploading(false);
-        if (fileRef.current) fileRef.current.value = "";
-      }
-    },
-    [qc, user],
-  );
-
-  async function saveHook() {
-    if (!user) return;
-    if (text.trim().length < 4) {
-      toast.error("Write the hook text first.");
-      return;
-    }
-    setSavingHook(true);
-    const projectId = await ensureStudioProject(user.id);
-    const { error } = await supabase.from("hooks").insert({
-      user_id: user.id,
-      project_id: projectId,
-      text: text.trim(),
-      category,
-      notes: notes.trim() || null,
-      is_winner: winner,
-    });
-    setSavingHook(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setText("");
-    setNotes("");
-    await qc.invalidateQueries({ queryKey: ["studio-hooks"] });
-    toast.success("Hook saved");
+function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
   }
+  return out;
+}
 
-  function toggleHook(id: string) {
-    setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((h) => h !== id);
-      if (prev.length >= MAX_HOOKS) {
-        toast.info(`You can select up to ${MAX_HOOKS} hooks per batch.`);
-        return prev;
-      }
-      return [...prev, id];
+/**
+ * Split `quantity` render slots evenly across `clipIds`. If it doesn't divide
+ * evenly, the remainder is randomly assigned to any of the selected clips
+ * (not deterministically to the first N clips in order) — so repeatedly
+ * requesting an odd quantity doesn't always favor the same clip over time.
+ * Returns one clip id per slot, in the order slots should be rendered.
+ */
+export function planClipAssignment(clipIds: string[], quantity: number): string[] {
+  const ids = clipIds.filter(Boolean);
+  if (ids.length === 0) return [];
+  const n = Math.max(1, quantity);
+  const base = Math.floor(n / ids.length);
+  const remainder = n % ids.length;
+
+  const assignment: string[] = [];
+  for (const id of ids) {
+    for (let i = 0; i < base; i++) assignment.push(id);
+  }
+  // Randomly pick which `remainder` clips get one extra slot, instead of
+  // always the first `remainder` clips in the array. Fisher-Yates, not
+  // Array.sort(() => Math.random() - 0.5) — the latter is a well-known
+  // biased shuffle whose distribution depends on the sort algorithm's
+  // comparison pattern, not a uniform random permutation.
+  const shuffledIds = shuffle(ids);
+  for (let i = 0; i < remainder; i++) assignment.push(shuffledIds[i]!);
+
+  // Shuffle the final render order too (cosmetic — doesn't affect the even
+  // split, just avoids all of one clip's slots being grouped together).
+  return shuffle(assignment);
+}
+
+export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
+  const { userId, projectId, asset, assetUrl, quantity, onUpdate } = input;
+  const plan = planVariants(input.hooks, quantity);
+  if (plan.length === 0) throw new Error("Select at least one hook.");
+
+  const placement: HookPlacement =
+    asset.hook_placement === "middle" || asset.hook_placement === "bottom"
+      ? asset.hook_placement
+      : "top";
+
+  // CLIP_SECONDS is a ceiling, not a target: a clip shorter than 8s must stay
+  // its own length. Only clips longer than 8s get trimmed down to it. Never
+  // stretch/freeze/duplicate a short source just to reach 8 seconds.
+  const sourceDuration = Number(asset.duration ?? CLIP_SECONDS);
+  const outputDuration = sourceDuration > 0 ? Math.min(sourceDuration, CLIP_SECONDS) : CLIP_SECONDS;
+
+  const offsets = planStartOffsets(sourceDuration, plan.length, outputDuration);
+
+  let items: BatchItem[] = [];
+  const push = () => onUpdate([...items]);
+  const patch = (jobId: string, p: Partial<BatchItem>) => {
+    items = items.map((b) => (b.jobId === jobId ? { ...b, ...p } : b));
+    push();
+  };
+
+  // 1. Persist the full recipe + job graph up front so the requested quantity
+  //    is visible and truthful before any pixels are drawn.
+  for (const hook of plan) {
+    const { data: recipe, error: recipeErr } = await supabase
+      .from("video_recipes")
+      .insert({
+        user_id: userId,
+        project_id: projectId,
+        hook_id: hook.id,
+        media_asset_id: asset.id,
+        duration: outputDuration,
+        overlay_text: hook.text,
+        overlay_position: placement,
+        font_size: 60,
+        background_color: "#00000000",
+        text_color: "#FFFFFF",
+
+        width: OUT_W,
+        height: OUT_H,
+      })
+      .select("id")
+      .single();
+    if (recipeErr || !recipe) throw new Error(recipeErr?.message ?? "Could not create the recipe.");
+
+    const { data: job, error: jobErr } = await supabase
+      .from("render_jobs")
+      .insert({
+        user_id: userId,
+        project_id: projectId,
+        recipe_id: recipe.id,
+        status: "queued",
+        progress: 0,
+      })
+      .select("id, created_at")
+      .single();
+    if (jobErr || !job) throw new Error(jobErr?.message ?? "Could not queue the render job.");
+
+    items.push({
+      jobId: job.id,
+      recipeId: recipe.id,
+      videoId: null,
+      hookId: hook.id,
+      hookText: hook.text,
+      sourceName: asset.filename,
+      sourceAssetId: asset.id,
+      durationSeconds: outputDuration,
+      createdAt: job.created_at,
+      outputPath: null,
+      thumbnailPath: null,
+      stage: "queued",
+      progress: 0,
     });
   }
+  push();
 
-  async function createVariants() {
-    if (!user || !asset || !assetUrl) {
-      toast.error("Upload a source video first.");
-      return;
-    }
-    if (selected.length === 0) {
-      toast.error("Select at least one hook.");
-      return;
-    }
-    const chosen = selected
-      .map((id) => (hooks ?? []).find((h) => h.id === id))
-      .filter((h): h is NonNullable<typeof h> => Boolean(h))
-      .map((h) => ({ id: h.id, text: h.text }));
-
-    const projectId = await ensureStudioProject(user.id);
-    if (!projectId) {
-      toast.error("Could not prepare the studio project.");
-      return;
-    }
-
-    setRendering(true);
-    setRequested(quantity);
-    setLive([]);
+  // 2. Render each variant.
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
     try {
-      const items = await runBatch({
-        userId: user.id,
-        projectId,
-        asset: {
-          id: asset.id,
-          filename: asset.filename,
-          duration: asset.duration,
-          storage_path: asset.storage_path,
-          hook_placement: asset.hook_placement,
-        },
-        assetUrl,
-        hooks: chosen,
-        quantity,
-        onUpdate: setLive,
+      patch(item.jobId, { stage: "rendering", progress: 4 });
+      await supabase
+        .from("render_jobs")
+        .update({ status: "processing", progress: 4, started_at: new Date().toISOString() })
+        .eq("id", item.jobId);
+
+      const { blob, extension, mimeType, thumbnail } = await renderVariant({
+        sourceUrl: assetUrl,
+        startSeconds: offsets[i] ?? 0,
+        durationSeconds: outputDuration,
+        width: OUT_W,
+        height: OUT_H,
+        text: item.hookText,
+        placement,
+        onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
       });
-      const done = items.filter((i) => i.stage === "completed").length;
-      if (done === items.length) toast.success(`${done} of ${quantity} variants rendered`);
-      else toast.warning(`${done} of ${quantity} variants rendered — see the failed cards below`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setRendering(false);
-      await qc.invalidateQueries({ queryKey: ["studio-results"] });
-      await qc.invalidateQueries({ queryKey: ["project"] });
-    }
-  }
 
-  async function removeResult(card: ResultCard) {
-    try {
-      if (card.videoId) {
-        await deleteRender({
-          id: card.videoId,
-          output_url: card.outputPath,
-          thumbnail_url: card.thumbnailPath,
-          render_job_id: card.jobId,
-          recipe_id: card.recipeId,
-        });
+      patch(item.jobId, { stage: "encoding", progress: 85 });
+      if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");
+
+      patch(item.jobId, { stage: "uploading", progress: 90 });
+      const outPath = `${userId}/${item.jobId}.${extension}`;
+      const { error: upErr } = await supabase.storage
+        .from(RENDER_BUCKET)
+        .upload(outPath, blob, { contentType: mimeType, upsert: true });
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+
+      let thumbPath: string | null = null;
+      if (thumbnail && thumbnail.size > 0) {
+        thumbPath = `${userId}/${item.jobId}.jpg`;
+        const { error: thumbErr } = await supabase.storage
+          .from(RENDER_BUCKET)
+          .upload(thumbPath, thumbnail, { contentType: "image/jpeg", upsert: true });
+        if (thumbErr) thumbPath = null;
       }
-      setLive((prev) => prev.filter((l) => l.jobId !== card.jobId));
-      await qc.invalidateQueries({ queryKey: ["studio-results"] });
-      await qc.invalidateQueries({ queryKey: ["project"] });
-      toast.success("Render deleted");
+
+      // 3. Verify the object is really there and playable before completing.
+      const url = await resolveRenderUrl(outPath);
+      if (!url) throw new Error("Upload finished but the output file could not be read back.");
+
+      const { data: video, error: videoErr } = await supabase
+        .from("generated_videos")
+        .insert({
+          user_id: userId,
+          project_id: projectId,
+          render_job_id: item.jobId,
+          recipe_id: item.recipeId,
+          hook_id: item.hookId,
+          media_asset_id: asset.id,
+          hook_text: item.hookText,
+          output_url: outPath,
+          thumbnail_url: thumbPath,
+          duration: outputDuration,
+          status: "completed",
+        })
+        .select("id")
+        .single();
+      if (videoErr) throw new Error(videoErr.message);
+
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "completed",
+          progress: 100,
+          output_url: outPath,
+          error_message: null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", item.jobId);
+
+      patch(item.jobId, {
+        outputPath: outPath,
+        thumbnailPath: thumbPath,
+        stage: "completed",
+        progress: 100,
+        url,
+        videoId: video?.id ?? null,
+        filename: `hook-variant-${i + 1}.${extension}`,
+      });
     } catch (e) {
-      toast.error((e as Error).message);
+      const message = (e as Error).message || "Render failed.";
+      patch(item.jobId, { stage: "failed", progress: 100, error: message });
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "failed",
+          progress: 100,
+          error_message: message,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", item.jobId);
     }
   }
 
-  return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Studio"
-        description="Upload one clip, select your hooks, choose how many variants to render, and export ready-to-post vertical videos."
-      />
+  return items;
+}
 
-      {/* 1. Source video */}
-      <section className="panel p-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold">1. Source video</h2>
-            <p className="text-xs text-muted-foreground">One MP4 or MOV clip powers the whole batch.</p>
-          </div>
-          <Button onClick={() => fileRef.current?.click()} disabled={uploading} variant="secondary">
-            {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-            Upload video
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="video/mp4,video/quicktime,.mp4,.mov"
-            hidden
-            onChange={(e) => {
-              const input = e.currentTarget;
-              const files = Array.from(input.files ?? []);
-              input.value = "";
-              const f = files[0];
-              if (f) void onUpload(f);
-            }}
-          />
-        </div>
+export type MultiClipAsset = {
+  id: string;
+  filename: string;
+  duration: number | null;
+  storage_path: string;
+  hook_placement?: string | null;
+  url: string;
+};
 
-        <div className="mt-5 grid gap-5 md:grid-cols-[240px_1fr]">
-          <div className="overflow-hidden rounded-xl border border-border bg-black">
-            {assetUrl ? (
-              <video
-                src={assetUrl}
-                controls
-                playsInline
-                preload="metadata"
-                className="aspect-[9/16] w-full bg-black object-contain"
-              />
+export type MultiClipBatchInput = {
+  userId: string;
+  projectId: string;
+  assets: MultiClipAsset[];
+  hooks: { id: string; text: string }[];
+  quantity: number;
+  onUpdate: (items: BatchItem[]) => void;
+};
 
-            ) : (
-              <div className="flex aspect-[9/16] items-center justify-center text-xs text-muted-foreground">
-                No source video
-              </div>
-            )}
-          </div>
-          <div className="space-y-3">
-            {asset ? (
-              <div className="text-sm">
-                <p className="font-medium">{asset.filename}</p>
-                <p className="text-xs text-muted-foreground">
-                  Duration {fmtDuration(asset.duration)} · output {OUT_W}×{OUT_H} ·{" "}
-                  {Math.round(Math.min(Number(asset.duration ?? CLIP_SECONDS), CLIP_SECONDS))}s per variant
-                </p>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">Upload a clip to get started.</p>
-            )}
-            {(assets ?? []).length > 1 && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Use another upload</Label>
-                <Select value={asset?.id ?? ""} onValueChange={setAssetId}>
-                  <SelectTrigger className="max-w-sm">
-                    <SelectValue placeholder="Pick a clip" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(assets ?? []).map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.filename}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+/**
+ * Same production pipeline as runBatch, but spreads the requested quantity
+ * across multiple selected clips instead of assuming a single source asset.
+ * Each render slot uses ITS OWN clip's duration, start-offset plan, and
+ * saved hook placement — a clip tagged "bottom" always renders with its
+ * hook on the bottom, regardless of what other selected clips are tagged.
+ */
+export async function runMultiClipBatch(input: MultiClipBatchInput): Promise<BatchItem[]> {
+  const { userId, projectId, assets, quantity, onUpdate } = input;
+  if (assets.length === 0) throw new Error("Select at least one clip.");
+  const hookPlan = planVariants(input.hooks, quantity);
+  if (hookPlan.length === 0) throw new Error("Select at least one hook.");
 
-      {/* 2. Hook library */}
-      <section className="panel p-5">
-        <h2 className="text-sm font-semibold">2. Hook library</h2>
-        <p className="text-xs text-muted-foreground">
-          Save your winning openings, then select up to {MAX_HOOKS} for this batch.
-        </p>
-
-        <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="hook-text" className="text-xs">
-                Hook text
-              </Label>
-              <Textarea
-                id="hook-text"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={3}
-                placeholder="I tried this for 30 days and…"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Content style</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {HOOK_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="hook-notes" className="text-xs">
-                Notes (optional)
-              </Label>
-              <Input
-                id="hook-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Where it worked, why it hit…"
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-              <span className="flex items-center gap-2 text-xs">
-                <Trophy className="size-3.5 text-primary" /> Winner
-              </span>
-              <Switch checked={winner} onCheckedChange={setWinner} />
-            </div>
-            <Button onClick={() => void saveHook()} disabled={savingHook} className="w-full">
-              {savingHook ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-              Save hook
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {selected.length}/{MAX_HOOKS} selected
-            </p>
-            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-              {(hooks ?? []).length === 0 ? (
-                <p className="px-4 py-8 text-center text-xs text-muted-foreground">
-                  No hooks yet — save your first one.
-                </p>
-              ) : (
-                (hooks ?? []).map((h) => (
-                  <label
-                    key={h.id}
-                    className="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-surface-raised/50"
-                  >
-                    <Checkbox
-                      checked={selected.includes(h.id)}
-                      onCheckedChange={() => toggleHook(h.id)}
-                      className="mt-0.5"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm">{h.text}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                        {h.category}
-                        {h.is_winner ? " · Winner" : ""}
-                        {h.notes ? ` · ${h.notes}` : ""}
-                      </span>
-                    </span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 3. Batch */}
-      <section className="panel space-y-4 p-5">
-        <div>
-          <h2 className="text-sm font-semibold">3. Create the batch</h2>
-          <p className="text-xs text-muted-foreground">
-            Each variant trims a different section (up to {CLIP_SECONDS}s — shorter clips keep their full
-            length) and burns one hook into the exported file.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Batch quantity</Label>
-            <Select value={quantityChoice} onValueChange={setQuantityChoice}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUANTITY_PRESETS.map((q) => (
-                  <SelectItem key={q} value={String(q)}>
-                    {q} variant{q === 1 ? "" : "s"}
-                  </SelectItem>
-                ))}
-                <SelectItem value="custom">Custom…</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {quantityChoice === "custom" ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="custom-qty" className="text-xs">
-                How many? (1–{MAX_QUANTITY})
-              </Label>
-              <Input
-                id="custom-qty"
-                type="number"
-                min={1}
-                max={MAX_QUANTITY}
-                value={customQuantity}
-                onChange={(e) => setCustomQuantity(e.target.value)}
-                className="w-32"
-              />
-            </div>
-          ) : null}
-
-          <Button
-            onClick={() => void createVariants()}
-            disabled={rendering || selected.length === 0 || !asset}
-          >
-            {rendering ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-            Render {quantity} variant{quantity === 1 ? "" : "s"}
-          </Button>
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          Requesting <span className="font-medium text-foreground">{quantity}</span> variant
-          {quantity === 1 ? "" : "s"} from {selected.length || 0} selected hook
-          {selected.length === 1 ? "" : "s"}
-          {selected.length > 0 && quantity > selected.length
-            ? " (hooks cycle across the batch)"
-            : ""}
-          . Nothing extra is generated.
-        </p>
-
-        {requested > 0 ? (
-          <div className="rounded-lg border border-border bg-surface-raised/40 px-4 py-3 text-xs">
-            <span className="font-medium">
-              {completedCount} completed / {requested} requested
-            </span>
-            {failedItems.length > 0 ? (
-              <span className="text-destructive">
-                {" "}
-                · {failedItems.length} failed:{" "}
-                {failedItems.map((f) => f.jobId.slice(0, 8)).join(", ")}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-
-      {/* 4. Results */}
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">4. Results</h2>
-        {results.length === 0 ? (
-          <EmptyState
-            icon={Film}
-            title="No variants yet"
-            description="Upload a clip, select hooks, choose a batch size and run the render."
-          />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {results.map((b, i) => (
-              <div key={b.jobId} className="panel space-y-3 p-4">
-                <div className="overflow-hidden rounded-lg border border-border bg-black">
-                  {b.url ? (
-                    <RenderPlayer src={b.url} />
-                  ) : (
-                    <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">
-                      {b.stage === "failed" ? "Render failed" : `${STAGE_LABEL[b.stage]}…`}
-                    </div>
-                  )}
-                </div>
-                <p className="line-clamp-2 text-sm font-medium">{b.hookText}</p>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  {b.sourceName} · {Math.round(b.durationSeconds)}s · {fmtDate(b.createdAt)}
-                  <br />
-                  Job {b.jobId.slice(0, 8)}
-                  {b.recipeId ? ` · Recipe ${b.recipeId.slice(0, 8)}` : ""}
-                </p>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <StatusPill status={STAGE_LABEL[b.stage]} />
-                  <div className="flex items-center gap-2">
-                    {b.url ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          void downloadRender(b.url!, b.filename ?? `hook-variant-${i + 1}.mp4`).catch((e) =>
-                            toast.error((e as Error).message),
-                          )
-                        }
-                      >
-                        <Download className="size-3.5" />
-                        Download
-                      </Button>
-                    ) : null}
-                    {b.videoId ? (
-                      <DeleteRenderButton onConfirm={() => removeResult(b)} />
-                    ) : null}
-                  </div>
-                </div>
-
-                {b.stage !== "completed" && b.stage !== "failed" ? (
-                  <Progress value={b.progress} className="h-1.5" />
-                ) : null}
-                {b.error ? <p className="text-[11px] text-destructive">{b.error}</p> : null}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+  const assetById = new Map(assets.map((a) => [a.id, a]));
+  const clipAssignment = planClipAssignment(
+    assets.map((a) => a.id),
+    hookPlan.length,
   );
+
+  // Precompute each distinct clip's output duration and start-offset plan
+  // once (not per slot) — a clip's own duration never changes between slots,
+  // only which offset within it a given slot uses.
+  const perClip = new Map<string, { outputDuration: number; offsets: number[]; placement: HookPlacement }>();
+  for (const asset of assets) {
+    const slotsForThisClip = clipAssignment.filter((id) => id === asset.id).length;
+    const sourceDuration = Number(asset.duration ?? CLIP_SECONDS);
+    const outputDuration = sourceDuration > 0 ? Math.min(sourceDuration, CLIP_SECONDS) : CLIP_SECONDS;
+    const placement: HookPlacement =
+      asset.hook_placement === "middle" || asset.hook_placement === "bottom" ? asset.hook_placement : "top";
+    perClip.set(asset.id, {
+      outputDuration,
+      offsets: planStartOffsets(sourceDuration, Math.max(1, slotsForThisClip), outputDuration),
+      placement,
+    });
+  }
+  // Track how many slots of each clip we've already consumed an offset for.
+  const usedOffsets = new Map<string, number>();
+
+  let items: BatchItem[] = [];
+  const push = () => onUpdate([...items]);
+  const patch = (jobId: string, p: Partial<BatchItem>) => {
+    items = items.map((b) => (b.jobId === jobId ? { ...b, ...p } : b));
+    push();
+  };
+
+  // 1. Persist the full recipe + job graph up front, one per slot, each tied
+  //    to its assigned clip.
+  for (let i = 0; i < hookPlan.length; i++) {
+    const hook = hookPlan[i]!;
+    const clipId = clipAssignment[i]!;
+    const asset = assetById.get(clipId)!;
+    const clipInfo = perClip.get(clipId)!;
+
+    const { data: recipe, error: recipeErr } = await supabase
+      .from("video_recipes")
+      .insert({
+        user_id: userId,
+        project_id: projectId,
+        hook_id: hook.id,
+        media_asset_id: asset.id,
+        duration: clipInfo.outputDuration,
+        overlay_text: hook.text,
+        overlay_position: clipInfo.placement,
+        font_size: 60,
+        background_color: "#00000000",
+        text_color: "#FFFFFF",
+        width: OUT_W,
+        height: OUT_H,
+      })
+      .select("id")
+      .single();
+    if (recipeErr || !recipe) throw new Error(recipeErr?.message ?? "Could not create the recipe.");
+
+    const { data: job, error: jobErr } = await supabase
+      .from("render_jobs")
+      .insert({
+        user_id: userId,
+        project_id: projectId,
+        recipe_id: recipe.id,
+        status: "queued",
+        progress: 0,
+      })
+      .select("id, created_at")
+      .single();
+    if (jobErr || !job) throw new Error(jobErr?.message ?? "Could not queue the render job.");
+
+    items.push({
+      jobId: job.id,
+      recipeId: recipe.id,
+      videoId: null,
+      hookId: hook.id,
+      hookText: hook.text,
+      sourceName: asset.filename,
+      sourceAssetId: asset.id,
+      durationSeconds: clipInfo.outputDuration,
+      createdAt: job.created_at,
+      outputPath: null,
+      thumbnailPath: null,
+      stage: "queued",
+      progress: 0,
+    });
+  }
+  push();
+
+  // 2. Render each variant, reading from its own assigned clip.
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const clipId = clipAssignment[i]!;
+    const asset = assetById.get(clipId)!;
+    const clipInfo = perClip.get(clipId)!;
+    const usedForThisClip = usedOffsets.get(clipId) ?? 0;
+    const startSeconds = clipInfo.offsets[usedForThisClip] ?? 0;
+    usedOffsets.set(clipId, usedForThisClip + 1);
+
+    try {
+      patch(item.jobId, { stage: "rendering", progress: 4 });
+      await supabase
+        .from("render_jobs")
+        .update({ status: "processing", progress: 4, started_at: new Date().toISOString() })
+        .eq("id", item.jobId);
+
+      const { blob, extension, mimeType, thumbnail } = await renderVariant({
+        sourceUrl: asset.url,
+        startSeconds,
+        durationSeconds: clipInfo.outputDuration,
+        width: OUT_W,
+        height: OUT_H,
+        text: item.hookText,
+        placement: clipInfo.placement,
+        onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
+      });
+
+      patch(item.jobId, { stage: "encoding", progress: 85 });
+      if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");
+
+      patch(item.jobId, { stage: "uploading", progress: 90 });
+      const outPath = `${userId}/${item.jobId}.${extension}`;
+      const { error: upErr } = await supabase.storage
+        .from(RENDER_BUCKET)
+        .upload(outPath, blob, { contentType: mimeType, upsert: true });
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+
+      let thumbPath: string | null = null;
+      if (thumbnail && thumbnail.size > 0) {
+        thumbPath = `${userId}/${item.jobId}.jpg`;
+        const { error: thumbErr } = await supabase.storage
+          .from(RENDER_BUCKET)
+          .upload(thumbPath, thumbnail, { contentType: "image/jpeg", upsert: true });
+        if (thumbErr) thumbPath = null;
+      }
+
+      const url = await resolveRenderUrl(outPath);
+      if (!url) throw new Error("Upload finished but the output file could not be read back.");
+
+      const { data: video, error: videoErr } = await supabase
+        .from("generated_videos")
+        .insert({
+          user_id: userId,
+          project_id: projectId,
+          render_job_id: item.jobId,
+          recipe_id: item.recipeId,
+          hook_id: item.hookId,
+          media_asset_id: asset.id,
+          hook_text: item.hookText,
+          output_url: outPath,
+          thumbnail_url: thumbPath,
+          duration: clipInfo.outputDuration,
+          status: "completed",
+        })
+        .select("id")
+        .single();
+      if (videoErr) throw new Error(videoErr.message);
+
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "completed",
+          progress: 100,
+          output_url: outPath,
+          error_message: null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", item.jobId);
+
+      patch(item.jobId, {
+        outputPath: outPath,
+        thumbnailPath: thumbPath,
+        stage: "completed",
+        progress: 100,
+        url,
+        videoId: video?.id ?? null,
+        filename: `hook-variant-${i + 1}.${extension}`,
+      });
+    } catch (e) {
+      const message = (e as Error).message || "Render failed.";
+      patch(item.jobId, { stage: "failed", progress: 100, error: message });
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "failed",
+          progress: 100,
+          error_message: message,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", item.jobId);
+    }
+  }
+
+  return items;
 }
 
-async function ensureStudioProject(userId: string) {
-  const { data: existing } = await supabase
-    .from("projects")
-    .select("id")
-    .eq("name", "Studio")
-    .limit(1)
-    .maybeSingle();
-  if (existing?.id) return existing.id;
-  const { data } = await supabase
-    .from("projects")
-    .insert({ user_id: userId, name: "Studio", platform: "both", content_style: "ugc" })
-    .select("id")
-    .single();
-  return data?.id ?? null;
-}
+/** Jobs left in an active state longer than this were abandoned (tab closed, crash). */
+export const STALE_JOB_MS = 1000 * 60 * 20;
 
-function probeVideo(file: File) {
-  return new Promise<{ duration: number; width: number; height: number }>((resolve) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      const meta = {
-        duration: Number.isFinite(video.duration) ? Math.round(video.duration * 100) / 100 : 0,
-        width: video.videoWidth,
-        height: video.videoHeight,
-      };
-      URL.revokeObjectURL(url);
-      resolve(meta);
-    };
-    video.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ duration: 0, width: 0, height: 0 });
-    };
-    video.src = url;
-  });
+/**
+ * Renders run in the browser tab that started them, so a closed tab can strand
+ * a job in `queued`/`processing` forever. Flip anything older than the cutoff to
+ * `failed` so the active queue only ever shows work that is really in flight.
+ */
+export async function reapStaleJobs(userId: string, projectId?: string) {
+  const cutoff = new Date(Date.now() - STALE_JOB_MS).toISOString();
+  let q = supabase
+    .from("render_jobs")
+    .update({
+      status: "failed",
+      progress: 100,
+      error_message: "Render was interrupted before it finished. Run it again.",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .in("status", ["queued", "processing"])
+    .lt("created_at", cutoff);
+  if (projectId) q = q.eq("project_id", projectId);
+  const { error } = await q;
+  if (error) return 0;
+  return 1;
 }
