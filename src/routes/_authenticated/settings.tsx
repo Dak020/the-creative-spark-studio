@@ -48,6 +48,11 @@ function SettingsPage() {
   const { data: storage, isLoading: storageLoading } = useQuery({
     queryKey: ["settings-storage", user?.id],
     enabled: !!user?.id,
+    // Uploads and deletes happen on other pages, so always re-read Storage
+    // when this page is opened or refocused rather than serving a stale total.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       async function bucketUsage(bucket: string) {
         let offset = 0;
