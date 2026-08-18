@@ -27,8 +27,11 @@ import {
   STAGE_LABEL,
   reapStaleJobs,
   runBatch,
+  runMultiClipBatch,
   type BatchItem,
 } from "@/lib/render/pipeline";
+import { Checkbox } from "@/components/ui/checkbox";
+
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
 import { RenderPlayer } from "@/components/RenderPlayer";
@@ -58,6 +61,11 @@ function ProjectWorkspace() {
   const [quantityChoice, setQuantityChoice] = useState("5");
   const [customQuantity, setCustomQuantity] = useState("8");
   const [live, setLive] = useState<BatchItem[]>([]);
+  // Same multi-clip rule as Studio: with 2+ clips selected, one batch is split
+  // evenly across them (remainder randomly assigned). Defaults to every clip
+  // in the project's media library.
+  const [selectedClipIds, setSelectedClipIds] = useState<string[] | null>(null);
+
 
   const quantity = useMemo(() => {
     if (quantityChoice !== "custom") return Number(quantityChoice);
@@ -127,38 +135,90 @@ function ProjectWorkspace() {
     },
   });
 
+
+  const mediaList = useMemo(() => data?.media ?? [], [data?.media]);
+  const activeClipIds = useMemo(
+    () =>
+      (selectedClipIds ?? mediaList.map((m) => m.id)).filter((id) =>
+        mediaList.some((m) => m.id === id),
+      ),
+    [selectedClipIds, mediaList],
+  );
+
+  function toggleClip(id: string) {
+    setSelectedClipIds((prev) => {
+      const base = prev ?? mediaList.map((m) => m.id);
+      return base.includes(id) ? base.filter((c) => c !== id) : [...base, id];
+    });
+  }
+
   async function generateBatch() {
     if (!user) return;
     const hooks = data?.hooks ?? [];
-    const asset = (data?.media ?? [])[0];
     if (hooks.length === 0) {
       toast.error("Add at least one hook to this project first.");
       return;
     }
-    if (!asset) {
-      toast.error("Upload at least one clip to this project first.");
-      return;
-    }
-    const url = await signedUrl("media", asset.storage_path, 60 * 60 * 6);
-    if (!url) {
-      toast.error("The source clip could not be read from storage.");
+    const chosenAssets = activeClipIds
+      .map((id) => mediaList.find((m) => m.id === id))
+      .filter((a): a is NonNullable<typeof a> => Boolean(a));
+    if (chosenAssets.length === 0) {
+      toast.error("Select at least one clip from this project's media library.");
       return;
     }
     const count = quantity;
+    const hookList = hooks.map((h) => ({ id: h.id, text: h.text }));
     setRunning(true);
     setLive([]);
     try {
-      const items = await runBatch({
-        userId: user.id,
-        projectId,
-        asset,
-        assetUrl: url,
-        hooks: hooks.map((h) => ({ id: h.id, text: h.text })),
-        quantity: count,
-        onUpdate: setLive,
-      });
+      let items: BatchItem[];
+      if (chosenAssets.length > 1) {
+        const withUrls = await Promise.all(
+          chosenAssets.map(async (a) => {
+            const url = await signedUrl("media", a.storage_path, 60 * 60 * 6);
+            return url ? { ...a, url } : null;
+          }),
+        );
+        const ready = withUrls.filter((a): a is NonNullable<typeof a> => Boolean(a));
+        if (ready.length === 0) {
+          toast.error("The selected clips could not be read from storage.");
+          return;
+        }
+        items = await runMultiClipBatch({
+          userId: user.id,
+          projectId,
+          assets: ready.map((a) => ({
+            id: a.id,
+            filename: a.filename,
+            duration: a.duration,
+            storage_path: a.storage_path,
+            hook_placement: a.hook_placement,
+            url: a.url,
+          })),
+          hooks: hookList,
+          quantity: count,
+          onUpdate: setLive,
+        });
+      } else {
+        const asset = chosenAssets[0]!;
+        const url = await signedUrl("media", asset.storage_path, 60 * 60 * 6);
+        if (!url) {
+          toast.error("The source clip could not be read from storage.");
+          return;
+        }
+        items = await runBatch({
+          userId: user.id,
+          projectId,
+          asset,
+          assetUrl: url,
+          hooks: hookList,
+          quantity: count,
+          onUpdate: setLive,
+        });
+      }
       const done = items.filter((i) => i.stage === "completed").length;
-      if (done === items.length) toast.success(`${done} of ${count} variants rendered`);
+      const across = chosenAssets.length > 1 ? ` across ${chosenAssets.length} clips` : "";
+      if (done === items.length) toast.success(`${done} of ${count} variants rendered${across}`);
       else toast.warning(`${done} of ${count} variants rendered — check the failed jobs`);
     } catch (e) {
       toast.error((e as Error).message);
@@ -167,6 +227,7 @@ function ProjectWorkspace() {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
     }
   }
+
 
 
   if (isLoading) {
@@ -293,6 +354,47 @@ function ProjectWorkspace() {
           </div>
         </div>
       ) : null}
+
+      {mediaList.length > 0 ? (
+        <div className="panel space-y-3 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">Clips used in this batch</p>
+              <p className="text-xs text-muted-foreground">
+                {activeClipIds.length > 1
+                  ? `The ${quantity} variants split evenly across ${activeClipIds.length} clips — any remainder goes to a random pick, and each clip keeps its own hook placement.`
+                  : "Pick 2 or more clips to spread the batch across them."}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setSelectedClipIds(
+                  activeClipIds.length === mediaList.length ? [] : mediaList.map((m) => m.id),
+                )
+              }
+            >
+              {activeClipIds.length === mediaList.length ? "Clear all" : "Select all"}
+            </Button>
+          </div>
+          <div className="max-h-48 space-y-1 overflow-y-auto">
+            {mediaList.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={activeClipIds.includes(m.id)}
+                  onCheckedChange={() => toggleClip(m.id)}
+                />
+                <span className="line-clamp-1">{m.filename}</span>
+                <span className="ml-auto shrink-0 text-muted-foreground">
+                  {Math.round(Number(m.duration ?? 0))}s
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
 
       <Tabs defaultValue="hooks">
         <TabsList>
