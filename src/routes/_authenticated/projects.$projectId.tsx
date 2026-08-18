@@ -61,6 +61,11 @@ function ProjectWorkspace() {
   const [quantityChoice, setQuantityChoice] = useState("5");
   const [customQuantity, setCustomQuantity] = useState("8");
   const [live, setLive] = useState<BatchItem[]>([]);
+  // Same multi-clip rule as Studio: with 2+ clips selected, one batch is split
+  // evenly across them (remainder randomly assigned). Defaults to every clip
+  // in the project's media library.
+  const [selectedClipIds, setSelectedClipIds] = useState<string[] | null>(null);
+
 
   const quantity = useMemo(() => {
     if (quantityChoice !== "custom") return Number(quantityChoice);
