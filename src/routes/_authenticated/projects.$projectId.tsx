@@ -135,38 +135,90 @@ function ProjectWorkspace() {
     },
   });
 
+
+  const mediaList = useMemo(() => data?.media ?? [], [data?.media]);
+  const activeClipIds = useMemo(
+    () =>
+      (selectedClipIds ?? mediaList.map((m) => m.id)).filter((id) =>
+        mediaList.some((m) => m.id === id),
+      ),
+    [selectedClipIds, mediaList],
+  );
+
+  function toggleClip(id: string) {
+    setSelectedClipIds((prev) => {
+      const base = prev ?? mediaList.map((m) => m.id);
+      return base.includes(id) ? base.filter((c) => c !== id) : [...base, id];
+    });
+  }
+
   async function generateBatch() {
     if (!user) return;
     const hooks = data?.hooks ?? [];
-    const asset = (data?.media ?? [])[0];
     if (hooks.length === 0) {
       toast.error("Add at least one hook to this project first.");
       return;
     }
-    if (!asset) {
-      toast.error("Upload at least one clip to this project first.");
-      return;
-    }
-    const url = await signedUrl("media", asset.storage_path, 60 * 60 * 6);
-    if (!url) {
-      toast.error("The source clip could not be read from storage.");
+    const chosenAssets = activeClipIds
+      .map((id) => mediaList.find((m) => m.id === id))
+      .filter((a): a is NonNullable<typeof a> => Boolean(a));
+    if (chosenAssets.length === 0) {
+      toast.error("Select at least one clip from this project's media library.");
       return;
     }
     const count = quantity;
+    const hookList = hooks.map((h) => ({ id: h.id, text: h.text }));
     setRunning(true);
     setLive([]);
     try {
-      const items = await runBatch({
-        userId: user.id,
-        projectId,
-        asset,
-        assetUrl: url,
-        hooks: hooks.map((h) => ({ id: h.id, text: h.text })),
-        quantity: count,
-        onUpdate: setLive,
-      });
+      let items: BatchItem[];
+      if (chosenAssets.length > 1) {
+        const withUrls = await Promise.all(
+          chosenAssets.map(async (a) => {
+            const url = await signedUrl("media", a.storage_path, 60 * 60 * 6);
+            return url ? { ...a, url } : null;
+          }),
+        );
+        const ready = withUrls.filter((a): a is NonNullable<typeof a> => Boolean(a));
+        if (ready.length === 0) {
+          toast.error("The selected clips could not be read from storage.");
+          return;
+        }
+        items = await runMultiClipBatch({
+          userId: user.id,
+          projectId,
+          assets: ready.map((a) => ({
+            id: a.id,
+            filename: a.filename,
+            duration: a.duration,
+            storage_path: a.storage_path,
+            hook_placement: a.hook_placement,
+            url: a.url,
+          })),
+          hooks: hookList,
+          quantity: count,
+          onUpdate: setLive,
+        });
+      } else {
+        const asset = chosenAssets[0]!;
+        const url = await signedUrl("media", asset.storage_path, 60 * 60 * 6);
+        if (!url) {
+          toast.error("The source clip could not be read from storage.");
+          return;
+        }
+        items = await runBatch({
+          userId: user.id,
+          projectId,
+          asset,
+          assetUrl: url,
+          hooks: hookList,
+          quantity: count,
+          onUpdate: setLive,
+        });
+      }
       const done = items.filter((i) => i.stage === "completed").length;
-      if (done === items.length) toast.success(`${done} of ${count} variants rendered`);
+      const across = chosenAssets.length > 1 ? ` across ${chosenAssets.length} clips` : "";
+      if (done === items.length) toast.success(`${done} of ${count} variants rendered${across}`);
       else toast.warning(`${done} of ${count} variants rendered — check the failed jobs`);
     } catch (e) {
       toast.error((e as Error).message);
@@ -175,6 +227,7 @@ function ProjectWorkspace() {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
     }
   }
+
 
 
   if (isLoading) {
