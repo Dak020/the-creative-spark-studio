@@ -27,8 +27,11 @@ import {
   STAGE_LABEL,
   reapStaleJobs,
   runBatch,
+  runMultiClipBatch,
   type BatchItem,
 } from "@/lib/render/pipeline";
+import { Checkbox } from "@/components/ui/checkbox";
+
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
 import { RenderPlayer } from "@/components/RenderPlayer";
