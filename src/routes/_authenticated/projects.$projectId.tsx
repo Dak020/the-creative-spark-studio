@@ -355,6 +355,47 @@ function ProjectWorkspace() {
         </div>
       ) : null}
 
+      {mediaList.length > 0 ? (
+        <div className="panel space-y-3 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">Clips used in this batch</p>
+              <p className="text-xs text-muted-foreground">
+                {activeClipIds.length > 1
+                  ? `The ${quantity} variants split evenly across ${activeClipIds.length} clips — any remainder goes to a random pick, and each clip keeps its own hook placement.`
+                  : "Pick 2 or more clips to spread the batch across them."}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setSelectedClipIds(
+                  activeClipIds.length === mediaList.length ? [] : mediaList.map((m) => m.id),
+                )
+              }
+            >
+              {activeClipIds.length === mediaList.length ? "Clear all" : "Select all"}
+            </Button>
+          </div>
+          <div className="max-h-48 space-y-1 overflow-y-auto">
+            {mediaList.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={activeClipIds.includes(m.id)}
+                  onCheckedChange={() => toggleClip(m.id)}
+                />
+                <span className="line-clamp-1">{m.filename}</span>
+                <span className="ml-auto shrink-0 text-muted-foreground">
+                  {Math.round(Number(m.duration ?? 0))}s
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+
       <Tabs defaultValue="hooks">
         <TabsList>
           <TabsTrigger value="hooks">Hooks</TabsTrigger>
