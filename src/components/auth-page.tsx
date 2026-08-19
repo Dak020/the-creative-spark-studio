@@ -67,11 +67,29 @@ export function AuthPage() {
 
   async function google() {
     setBusy(true);
+    const redirectUri = `${window.location.origin}/auth`;
+
+    // cloud-auth-js replaces redirect_uri with lovable://oauth-callback inside
+    // the Lovable mobile app. Some mobile browsers cannot resolve that deep
+    // link and show a 404, so start the managed web flow directly and preserve
+    // the same-origin /auth callback handled by our auth catch-all routes.
+    if (/LovableApp\//i.test(navigator.userAgent)) {
+      const stateBytes = crypto.getRandomValues(new Uint8Array(16));
+      const state = Array.from(stateBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const params = new URLSearchParams({
+        provider: "google",
+        redirect_uri: redirectUri,
+        state,
+      });
+      window.location.assign(`/~oauth/initiate?${params.toString()}`);
+      return;
+    }
+
     // Return to this public sign-in route (not a protected page): the
     // onAuthStateChange listener above forwards to the dashboard once the
     // session is hydrated.
     const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}/auth`,
+      redirect_uri: redirectUri,
     });
     if (result.error) {
       setBusy(false);
