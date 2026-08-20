@@ -42,7 +42,7 @@ export const SAFE_ZONES: Record<HookPlacement, { top: number; bottom: number; wi
   bottom: { top: 0.6, bottom: 0.78, width: 0.72 },
 };
 
-function pickMimeType(): string {
+export function pickMimeType(): string {
   const candidates = [
     "video/mp4;codecs=avc1.42E01E",
     "video/mp4",
@@ -56,7 +56,7 @@ function pickMimeType(): string {
   return "video/webm";
 }
 
-function fontFor(size: number) {
+export function fontFor(size: number) {
   return `900 ${size}px "Inter", "Helvetica Neue", system-ui, -apple-system, "Segoe UI", sans-serif`;
 }
 
@@ -81,7 +81,7 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
  * Lay the hook out as ONE cohesive centered text block at natural TikTok
  * caption scale, shrinking until it fits entirely inside its safe zone.
  */
-function layoutOverlay(
+export function layoutOverlay(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
@@ -128,7 +128,7 @@ function layoutOverlay(
 }
 
 
-function waitFor(el: HTMLVideoElement, event: string) {
+export function waitFor(el: HTMLVideoElement, event: string) {
   return new Promise<void>((resolve, reject) => {
     const ok = () => {
       cleanup();
