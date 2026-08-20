@@ -175,7 +175,7 @@ export function waitFor(el: HTMLVideoElement, event: string) {
 
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
-  const { sourceUrl, durationSeconds, width, height, text } = opts;
+  const { sourceUrl, durationSeconds, width, height, text, withAudio } = opts;
 
   // layoutOverlay measures text to decide wrapping and font size, and
   // drawFrame paints with the same font string — but if the "Inter" webfont
@@ -199,7 +199,8 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
 
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
-  video.muted = true;
+  video.muted = !withAudio;
+  video.volume = 1;
   video.playsInline = true;
   video.preload = "auto";
   video.src = sourceUrl;
@@ -264,6 +265,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
   const manualFrames = typeof track?.requestFrame === "function";
   const captureStreamToUse = manualFrames ? stream : canvas.captureStream(30);
+  const audioCtx = withAudio ? attachAudioTrack(video, captureStreamToUse) : null;
   const recorder = new MediaRecorder(captureStreamToUse, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (e) => {
