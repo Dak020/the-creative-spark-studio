@@ -21,8 +21,34 @@ export type BrowserRenderOptions = {
   text: string;
   placement?: HookPlacement;
   fontSize?: number;
+  /** Keep the clip's original audio in the exported file. */
+  withAudio?: boolean;
   onProgress?: (pct: number) => void;
 };
+
+/**
+ * Route a video element's audio into a recordable stream WITHOUT sending it to
+ * the speakers (we never connect to ctx.destination, so the preview stays silent).
+ */
+export function attachAudioTrack(video: HTMLVideoElement, stream: MediaStream) {
+  const Ctor: typeof AudioContext | undefined =
+    (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
+      .AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    const ctx = new Ctor();
+    const dest = ctx.createMediaStreamDestination();
+    const source = ctx.createMediaElementSource(video);
+    source.connect(dest);
+    const audioTrack = dest.stream.getAudioTracks()[0];
+    if (audioTrack) stream.addTrack(audioTrack);
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
 
 export type BrowserRenderResult = {
   blob: Blob;
