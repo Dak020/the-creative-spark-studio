@@ -21,8 +21,34 @@ export type BrowserRenderOptions = {
   text: string;
   placement?: HookPlacement;
   fontSize?: number;
+  /** Keep the clip's original audio in the exported file. */
+  withAudio?: boolean;
   onProgress?: (pct: number) => void;
 };
+
+/**
+ * Route a video element's audio into a recordable stream WITHOUT sending it to
+ * the speakers (we never connect to ctx.destination, so the preview stays silent).
+ */
+export function attachAudioTrack(video: HTMLVideoElement, stream: MediaStream) {
+  const Ctor: typeof AudioContext | undefined =
+    (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
+      .AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    const ctx = new Ctor();
+    const dest = ctx.createMediaStreamDestination();
+    const source = ctx.createMediaElementSource(video);
+    source.connect(dest);
+    const audioTrack = dest.stream.getAudioTracks()[0];
+    if (audioTrack) stream.addTrack(audioTrack);
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
 
 export type BrowserRenderResult = {
   blob: Blob;
@@ -42,7 +68,7 @@ export const SAFE_ZONES: Record<HookPlacement, { top: number; bottom: number; wi
   bottom: { top: 0.6, bottom: 0.78, width: 0.72 },
 };
 
-function pickMimeType(): string {
+export function pickMimeType(): string {
   const candidates = [
     "video/mp4;codecs=avc1.42E01E",
     "video/mp4",
@@ -56,7 +82,7 @@ function pickMimeType(): string {
   return "video/webm";
 }
 
-function fontFor(size: number) {
+export function fontFor(size: number) {
   return `900 ${size}px "Inter", "Helvetica Neue", system-ui, -apple-system, "Segoe UI", sans-serif`;
 }
 
@@ -81,7 +107,7 @@ function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number
  * Lay the hook out as ONE cohesive centered text block at natural TikTok
  * caption scale, shrinking until it fits entirely inside its safe zone.
  */
-function layoutOverlay(
+export function layoutOverlay(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
@@ -128,7 +154,7 @@ function layoutOverlay(
 }
 
 
-function waitFor(el: HTMLVideoElement, event: string) {
+export function waitFor(el: HTMLVideoElement, event: string) {
   return new Promise<void>((resolve, reject) => {
     const ok = () => {
       cleanup();
@@ -149,7 +175,7 @@ function waitFor(el: HTMLVideoElement, event: string) {
 
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
-  const { sourceUrl, durationSeconds, width, height, text } = opts;
+  const { sourceUrl, durationSeconds, width, height, text, withAudio } = opts;
 
   // layoutOverlay measures text to decide wrapping and font size, and
   // drawFrame paints with the same font string — but if the "Inter" webfont
@@ -173,7 +199,8 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
 
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
-  video.muted = true;
+  video.muted = !withAudio;
+  video.volume = 1;
   video.playsInline = true;
   video.preload = "auto";
   video.src = sourceUrl;
@@ -238,6 +265,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
   const manualFrames = typeof track?.requestFrame === "function";
   const captureStreamToUse = manualFrames ? stream : canvas.captureStream(30);
+  const audioCtx = withAudio ? attachAudioTrack(video, captureStreamToUse) : null;
   const recorder = new MediaRecorder(captureStreamToUse, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (e) => {

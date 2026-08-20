@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      dna_recipes: {
+        Row: {
+          created_at: string
+          final_duration: number
+          hook_id: string | null
+          hook_placement: string
+          id: string
+          project_id: string
+          segments: Json
+          target_duration: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          final_duration?: number
+          hook_id?: string | null
+          hook_placement?: string
+          id?: string
+          project_id: string
+          segments?: Json
+          target_duration?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          final_duration?: number
+          hook_id?: string | null
+          hook_placement?: string
+          id?: string
+          project_id?: string
+          segments?: Json
+          target_duration?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dna_recipes_hook_id_fkey"
+            columns: ["hook_id"]
+            isOneToOne: false
+            referencedRelation: "hooks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dna_recipes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_videos: {
         Row: {
           created_at: string
@@ -240,8 +291,10 @@ export type Database = {
       }
       media_assets: {
         Row: {
+          allowed_speeds: number[]
           category: string
           created_at: string
+          dna_role: string | null
           duration: number | null
           file_url: string | null
           filename: string
@@ -257,8 +310,10 @@ export type Database = {
           width: number | null
         }
         Insert: {
+          allowed_speeds?: number[]
           category?: string
           created_at?: string
+          dna_role?: string | null
           duration?: number | null
           file_url?: string | null
           filename: string
@@ -274,8 +329,10 @@ export type Database = {
           width?: number | null
         }
         Update: {
+          allowed_speeds?: number[]
           category?: string
           created_at?: string
+          dna_role?: string | null
           duration?: number | null
           file_url?: string | null
           filename?: string
