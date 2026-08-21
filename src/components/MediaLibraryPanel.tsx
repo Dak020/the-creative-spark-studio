@@ -47,8 +47,19 @@ export type MediaAsset = {
   category: string;
   tags: string[];
   hook_placement: string | null;
+  dna_role: string | null;
+  allowed_speeds: number[] | null;
   created_at: string;
 };
+
+const DNA_ROLE_OPTIONS = [
+  { value: "none", label: "None" },
+  { value: "start", label: "Start" },
+  { value: "middle", label: "Middle" },
+  { value: "end", label: "End" },
+] as const;
+
+const DNA_SPEED_OPTIONS = [1, 1.5, 1.7, 2] as const;
 
 
 type UploadDiagnostic = {
