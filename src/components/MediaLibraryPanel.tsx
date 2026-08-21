@@ -611,6 +611,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   <Badge className="text-[10px]">
                     Hook: {hookPlacementLabel(asset.hook_placement)}
                   </Badge>
+                  {asset.dna_role && (
+                    <Badge variant="outline" className="border-primary text-[10px] capitalize text-primary">
+                      DNA: {asset.dna_role}
+                    </Badge>
+                  )}
                   {projectNames && (
                     <Badge variant="outline" className="text-[10px]">
                       {asset.project_id ? (projectNames.get(asset.project_id) ?? "Unknown project") : "Unsorted"}
