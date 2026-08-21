@@ -640,6 +640,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                       setEditCategory(asset.category);
                       setEditPlacement(asset.hook_placement ?? "top");
                       setEditTags(asset.tags.join(", "));
+                      setEditDnaRole(asset.dna_role ?? "none");
+                      setEditSpeeds(
+                        asset.allowed_speeds && asset.allowed_speeds.length > 0
+                          ? asset.allowed_speeds.map(Number)
+                          : [...DNA_SPEED_OPTIONS],
+                      );
                     }}
                   >
 
