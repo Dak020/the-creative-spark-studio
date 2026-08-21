@@ -134,6 +134,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [editCategory, setEditCategory] = useState("Other");
   const [editPlacement, setEditPlacement] = useState<string>("top");
   const [editTags, setEditTags] = useState("");
+  const [editDnaRole, setEditDnaRole] = useState<string>("none");
+  const [editSpeeds, setEditSpeeds] = useState<number[]>([...DNA_SPEED_OPTIONS]);
 
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
