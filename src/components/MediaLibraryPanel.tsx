@@ -47,8 +47,19 @@ export type MediaAsset = {
   category: string;
   tags: string[];
   hook_placement: string | null;
+  dna_role: string | null;
+  allowed_speeds: number[] | null;
   created_at: string;
 };
+
+const DNA_ROLE_OPTIONS = [
+  { value: "none", label: "None" },
+  { value: "start", label: "Start" },
+  { value: "middle", label: "Middle" },
+  { value: "end", label: "End" },
+] as const;
+
+const DNA_SPEED_OPTIONS = [1, 1.5, 1.7, 2] as const;
 
 
 type UploadDiagnostic = {
@@ -123,6 +134,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
   const [editCategory, setEditCategory] = useState("Other");
   const [editPlacement, setEditPlacement] = useState<string>("top");
   const [editTags, setEditTags] = useState("");
+  const [editDnaRole, setEditDnaRole] = useState<string>("none");
+  const [editSpeeds, setEditSpeeds] = useState<number[]>([...DNA_SPEED_OPTIONS]);
 
   const [uploadDiagnostics, setUploadDiagnostics] = useState<UploadDiagnostic[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -398,6 +411,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           category: editCategory,
           hook_placement: editPlacement,
           tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
+          dna_role: editDnaRole === "none" ? null : editDnaRole,
+          allowed_speeds: editSpeeds.length > 0 ? [...editSpeeds].sort((a, b) => a - b) : [...DNA_SPEED_OPTIONS],
         })
 
         .eq("id", editing.id);
@@ -596,6 +611,11 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   <Badge className="text-[10px]">
                     Hook: {hookPlacementLabel(asset.hook_placement)}
                   </Badge>
+                  {asset.dna_role && (
+                    <Badge variant="outline" className="border-primary text-[10px] capitalize text-primary">
+                      DNA: {asset.dna_role}
+                    </Badge>
+                  )}
                   {projectNames && (
                     <Badge variant="outline" className="text-[10px]">
                       {asset.project_id ? (projectNames.get(asset.project_id) ?? "Unknown project") : "Unsorted"}
@@ -620,6 +640,12 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                       setEditCategory(asset.category);
                       setEditPlacement(asset.hook_placement ?? "top");
                       setEditTags(asset.tags.join(", "));
+                      setEditDnaRole(asset.dna_role ?? "none");
+                      setEditSpeeds(
+                        asset.allowed_speeds && asset.allowed_speeds.length > 0
+                          ? asset.allowed_speeds.map(Number)
+                          : [...DNA_SPEED_OPTIONS],
+                      );
                     }}
                   >
 
@@ -697,6 +723,54 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Clip DNA role</Label>
+              <Select value={editDnaRole} onValueChange={setEditDnaRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DNA_ROLE_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                None keeps this clip out of DNA edits — it renders exactly as it does today.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Allowed speeds</Label>
+              <div className="flex flex-wrap gap-2">
+                {DNA_SPEED_OPTIONS.map((s) => {
+                  const active = editSpeeds.includes(s);
+                  return (
+                    <Button
+                      key={s}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      className="h-7 text-xs"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setEditSpeeds((prev) =>
+                          prev.includes(s) ? prev.filter((v) => v !== s) : [...prev, s],
+                        )
+                      }
+                    >
+                      {s}x
+                    </Button>
+                  );
+                })}
+              </div>
+              {editSpeeds.length === 0 && (
+                <p className="text-[11px] text-destructive">
+                  At least one speed is needed — all four will be used if you leave this empty.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="tags">Tags (comma separated)</Label>
