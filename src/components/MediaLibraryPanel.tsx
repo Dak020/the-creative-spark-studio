@@ -411,6 +411,8 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
           category: editCategory,
           hook_placement: editPlacement,
           tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
+          dna_role: editDnaRole === "none" ? null : editDnaRole,
+          allowed_speeds: editSpeeds.length > 0 ? [...editSpeeds].sort((a, b) => a - b) : [...DNA_SPEED_OPTIONS],
         })
 
         .eq("id", editing.id);
