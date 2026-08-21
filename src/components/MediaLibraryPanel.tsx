@@ -725,6 +725,54 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Clip DNA role</Label>
+              <Select value={editDnaRole} onValueChange={setEditDnaRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DNA_ROLE_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                None keeps this clip out of DNA edits — it renders exactly as it does today.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Allowed speeds</Label>
+              <div className="flex flex-wrap gap-2">
+                {DNA_SPEED_OPTIONS.map((s) => {
+                  const active = editSpeeds.includes(s);
+                  return (
+                    <Button
+                      key={s}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      className="h-7 text-xs"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setEditSpeeds((prev) =>
+                          prev.includes(s) ? prev.filter((v) => v !== s) : [...prev, s],
+                        )
+                      }
+                    >
+                      {s}x
+                    </Button>
+                  );
+                })}
+              </div>
+              {editSpeeds.length === 0 && (
+                <p className="text-[11px] text-destructive">
+                  At least one speed is needed — all four will be used if you leave this empty.
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="tags">Tags (comma separated)</Label>
               <Input
                 id="tags"
