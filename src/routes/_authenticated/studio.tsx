@@ -269,6 +269,7 @@ function StudioPage() {
   // selected clips (remainder randomly assigned) instead of using only the
   // single clip picked above.
   const [multiClipMode, setMultiClipMode] = useState(false);
+  const [originalSound, setOriginalSound] = useState(false);
   const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   function toggleClipSelected(id: string) {
     setSelectedClipIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
@@ -437,6 +438,7 @@ function StudioPage() {
           })),
           hooks: chosen,
           quantity,
+          withAudio: originalSound,
           onUpdate: setLive,
         });
         const done = items.filter((i) => i.stage === "completed").length;
@@ -474,6 +476,7 @@ function StudioPage() {
         assetUrl,
         hooks: chosen,
         quantity,
+        withAudio: originalSound,
         onUpdate: setLive,
       });
       const done = items.filter((i) => i.stage === "completed").length;
@@ -753,6 +756,16 @@ function StudioPage() {
             Each variant trims a different section (up to {CLIP_SECONDS}s — shorter clips keep their full
             length) and burns one hook into the exported file.
           </p>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+          <div>
+            <Label className="text-xs">Original sound</Label>
+            <p className="text-xs text-muted-foreground">
+              Keep the source clip's own audio in the export instead of a silent render.
+            </p>
+          </div>
+          <Switch checked={originalSound} onCheckedChange={setOriginalSound} />
         </div>
 
         <div className="flex flex-wrap items-end gap-4">
