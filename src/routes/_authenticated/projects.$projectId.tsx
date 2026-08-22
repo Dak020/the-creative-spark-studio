@@ -395,6 +395,114 @@ function ProjectWorkspace() {
         </div>
       ) : null}
 
+      <div className="panel space-y-4 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">Clip DNA</p>
+            <p className="text-xs text-muted-foreground">
+              Combine Start / Middle / End tagged clips into one edit. Tag clips and set their
+              allowed speeds in the Media tab. The hook is burned onto the opening segment only.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-xs">
+            <Checkbox
+              checked={originalSound}
+              onCheckedChange={(v) => setOriginalSound(Boolean(v))}
+            />
+            Original sound
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="dna-duration" className="text-xs">
+              Target duration (s)
+            </Label>
+            <Input
+              id="dna-duration"
+              type="number"
+              min={1}
+              max={60}
+              step={0.5}
+              value={targetDuration}
+              onChange={(e) => setTargetDuration(e.target.value)}
+              className="w-24"
+            />
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => void runDnaPreview()}
+            disabled={dnaRunning || !dnaRoles.ok}
+          >
+            {dnaRunning ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Sparkles className="size-4" />
+            )}
+            {dnaPreview ? "Try a different combination" : "Preview one DNA render"}
+          </Button>
+        </div>
+
+        {!dnaRoles.ok ? (
+          <p className="text-xs text-destructive">{dnaRoles.reason}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Combination: {dnaRoles.sequence.join(" + ")}
+          </p>
+        )}
+
+        {dnaLive.length > 0 && dnaRunning ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="line-clamp-1 text-muted-foreground">{dnaLive[0]!.hookText}</span>
+              <StatusPill status={STAGE_LABEL[dnaLive[0]!.stage]} />
+            </div>
+            <Progress value={dnaLive[0]!.progress} className="h-1.5" />
+          </div>
+        ) : null}
+
+        {dnaPreview ? (
+          <div className="space-y-3 rounded-lg border border-border p-4">
+            <div className="grid gap-4 sm:grid-cols-[200px_1fr]">
+              <div className="overflow-hidden rounded-lg border border-border bg-black">
+                {dnaPreview.item.url ? (
+                  <RenderPlayer src={dnaPreview.item.url} />
+                ) : (
+                  <div className="flex aspect-[9/16] items-center justify-center text-xs text-muted-foreground">
+                    No preview file
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2 text-xs">
+                <p className="font-medium">
+                  {dnaPreview.plan.finalDuration.toFixed(2)}s total · hook on the{" "}
+                  {dnaPreview.plan.segments[0]!.role} segment ({dnaPreview.plan.placement})
+                </p>
+                {describePlan(dnaPreview.plan).map((s, i) => (
+                  <p key={i} className="text-muted-foreground">
+                    {i + 1}. <span className="uppercase">{s.role}</span> · {s.filename} · {s.cut} ·{" "}
+                    {s.speed} · {s.outputDuration}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void approveDna()} disabled={dnaRunning}>
+                {dnaRunning ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="size-4" />
+                )}
+                Approve this style — render {Math.max(0, quantity - 1)} more
+              </Button>
+              <Button variant="ghost" onClick={() => setDnaPreview(null)} disabled={dnaRunning}>
+                Discard preview
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
 
       <Tabs defaultValue="hooks">
         <TabsList>
