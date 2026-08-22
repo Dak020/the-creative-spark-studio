@@ -275,7 +275,7 @@ export async function runDnaBatch(input: DnaBatchInput): Promise<BatchItem[]> {
       projectId: input.projectId,
       plan: planned.plan,
       hook,
-      withAudio: input.withAudio,
+      withAudio: !!input.withAudio,
       onUpdate: (updated) => {
         const idx = items.findIndex((b) => b.jobId === updated.jobId);
         if (idx >= 0) items[idx] = updated;
