@@ -66,6 +66,7 @@ export type BatchInput = {
   assetUrl: string;
   hooks: { id: string; text: string }[];
   quantity: number;
+  withAudio?: boolean;
   onUpdate: (items: BatchItem[]) => void;
 };
 
@@ -217,6 +218,7 @@ export async function runBatch(input: BatchInput): Promise<BatchItem[]> {
         height: OUT_H,
         text: item.hookText,
         placement,
+        withAudio: Boolean(input.withAudio),
         onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
       });
 
@@ -315,6 +317,7 @@ export type MultiClipBatchInput = {
   assets: MultiClipAsset[];
   hooks: { id: string; text: string }[];
   quantity: number;
+  withAudio?: boolean;
   onUpdate: (items: BatchItem[]) => void;
 };
 
@@ -447,6 +450,7 @@ export async function runMultiClipBatch(input: MultiClipBatchInput): Promise<Bat
         height: OUT_H,
         text: item.hookText,
         placement: clipInfo.placement,
+        withAudio: Boolean(input.withAudio),
         onProgress: (pct) => patch(item.jobId, { stage: "rendering", progress: Math.max(4, pct * 0.8) }),
       });
 
