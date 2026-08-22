@@ -31,6 +31,15 @@ import {
   type BatchItem,
 } from "@/lib/render/pipeline";
 import { Checkbox } from "@/components/ui/checkbox";
+import { checkRoles } from "@/lib/dna/solver";
+import {
+  planDna,
+  runDnaVariant,
+  runDnaBatch,
+  describePlan,
+  type DnaClip,
+  type DnaPlan,
+} from "@/lib/render/dna-pipeline";
 
 import { deleteRender } from "@/lib/render/delete";
 import { DeleteRenderButton } from "@/components/DeleteRenderButton";
@@ -65,6 +74,20 @@ function ProjectWorkspace() {
   // evenly across them (remainder randomly assigned). Defaults to every clip
   // in the project's media library.
   const [selectedClipIds, setSelectedClipIds] = useState<string[] | null>(null);
+
+  // Clip DNA: combine role-tagged clips into one edit instead of a single
+  // clip + hook. Separate running/progress state from the existing
+  // single-clip flow above, since a DNA render and a regular render are
+  // different pipelines that can't run at the same time from this page.
+  const [targetDuration, setTargetDuration] = useState("8");
+  const [originalSound, setOriginalSound] = useState(false);
+  const [dnaRunning, setDnaRunning] = useState(false);
+  const [dnaLive, setDnaLive] = useState<BatchItem[]>([]);
+  const [dnaPreview, setDnaPreview] = useState<{
+    item: BatchItem;
+    plan: DnaPlan;
+    clips: DnaClip[];
+  } | null>(null);
 
 
   const quantity = useMemo(() => {
@@ -105,7 +128,7 @@ function ProjectWorkspace() {
         supabase.from("hooks").select("id, text").eq("project_id", projectId),
         supabase
           .from("media_assets")
-          .select("id, filename, duration, storage_path, hook_placement")
+          .select("id, filename, duration, storage_path, hook_placement, dna_role, allowed_speeds")
           .eq("project_id", projectId)
           .order("created_at", { ascending: false }),
       ]);
@@ -144,6 +167,29 @@ function ProjectWorkspace() {
       ),
     [selectedClipIds, mediaList],
   );
+
+  // Only clips actually tagged with a DNA role participate — untagged clips
+  // in this same project are invisible to DNA and keep working with the
+  // regular single/multi-clip flow above.
+  const dnaClips = useMemo(
+    () =>
+      mediaList
+        .filter((m) => m.dna_role === "start" || m.dna_role === "middle" || m.dna_role === "end")
+        .map((m) => ({
+          id: m.id,
+          role: m.dna_role as "start" | "middle" | "end",
+          duration: Number(m.duration ?? 0),
+          allowedSpeeds:
+            Array.isArray(m.allowed_speeds) && m.allowed_speeds.length > 0
+              ? m.allowed_speeds.map(Number)
+              : [1.0, 1.5, 1.7, 2.0],
+          hookPlacement: m.hook_placement,
+          filename: m.filename,
+          storage_path: m.storage_path,
+        })),
+    [mediaList],
+  );
+  const dnaRoles = useMemo(() => checkRoles(dnaClips), [dnaClips]);
 
   function toggleClip(id: string) {
     setSelectedClipIds((prev) => {
@@ -225,6 +271,120 @@ function ProjectWorkspace() {
     } finally {
       setRunning(false);
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+    }
+  }
+
+
+
+  /** Sign a playable URL for every DNA-tagged clip. Returns null (with a
+   *  toast) if any clip's file can't be read from storage. */
+  async function resolveDnaClips(): Promise<DnaClip[] | null> {
+    const withUrls = await Promise.all(
+      dnaClips.map(async (c): Promise<DnaClip | null> => {
+        const url = await signedUrl("media", c.storage_path, 60 * 60 * 6);
+        return url ? { ...c, url } : null;
+      }),
+    );
+    const ready = withUrls.filter((c): c is DnaClip => Boolean(c));
+    if (ready.length !== dnaClips.length) {
+      toast.error("One or more DNA-tagged clips could not be read from storage.");
+      return null;
+    }
+    return ready;
+  }
+
+  async function runDnaPreview() {
+    if (!user) return;
+    if (!dnaRoles.ok) {
+      toast.error(dnaRoles.reason);
+      return;
+    }
+    const hooks = data?.hooks ?? [];
+    if (hooks.length === 0) {
+      toast.error("Add at least one hook to this project first.");
+      return;
+    }
+    const target = Number(targetDuration);
+    if (!Number.isFinite(target) || target <= 0) {
+      toast.error("Enter a valid target duration.");
+      return;
+    }
+
+    setDnaRunning(true);
+    setDnaLive([]);
+    setDnaPreview(null);
+    try {
+      const clips = await resolveDnaClips();
+      if (!clips) return;
+
+      const planned = planDna(clips, target);
+      if (!planned.ok) {
+        toast.error(planned.reason);
+        return;
+      }
+
+      const hookList = hooks.map((h) => ({ id: h.id, text: h.text }));
+      const hook = hookList[Math.floor(Math.random() * hookList.length)]!;
+
+      const item = await runDnaVariant({
+        userId: user.id,
+        projectId,
+        plan: planned.plan,
+        hook,
+        withAudio: originalSound,
+        onUpdate: (updated) => setDnaLive([updated]),
+      });
+
+      if (item.stage !== "completed") {
+        toast.error(item.error ?? "The preview render failed.");
+        return;
+      }
+      setDnaPreview({ item, plan: planned.plan, clips });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDnaRunning(false);
+    }
+  }
+
+  async function approveDna() {
+    if (!user || !dnaPreview) return;
+    const hooks = data?.hooks ?? [];
+    if (hooks.length === 0) {
+      toast.error("Add at least one hook to this project first.");
+      return;
+    }
+    const remaining = Math.max(0, quantity - 1);
+    if (remaining === 0) {
+      toast.success("Preview approved — that's the full batch.");
+      await qc.invalidateQueries({ queryKey: ["project", projectId] });
+      return;
+    }
+
+    const target = Number(targetDuration);
+    setDnaRunning(true);
+    setDnaLive([dnaPreview.item]);
+    try {
+      const hookList = hooks.map((h) => ({ id: h.id, text: h.text }));
+      const items = await runDnaBatch({
+        userId: user.id,
+        projectId,
+        clips: dnaPreview.clips,
+        hooks: hookList,
+        targetDuration: target,
+        quantity: remaining,
+        withAudio: originalSound,
+        onUpdate: (updated) => setDnaLive([dnaPreview.item, ...updated]),
+      });
+      const done = items.filter((i) => i.stage === "completed").length;
+      if (done === items.length) toast.success(`${done + 1} of ${quantity} DNA variants rendered`);
+      else toast.warning(`${done + 1} of ${quantity} DNA variants rendered — check the failed jobs`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDnaRunning(false);
+      setDnaPreview(null);
+      await qc.invalidateQueries({ queryKey: ["project", projectId] });
     }
   }
 
