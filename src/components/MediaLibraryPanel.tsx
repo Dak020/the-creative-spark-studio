@@ -743,35 +743,33 @@ export function MediaLibraryPanel({ projectId }: { projectId?: string }) {
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Allowed speeds</Label>
+              <Label>Playback speed</Label>
               <div className="flex flex-wrap gap-2">
-                {DNA_SPEED_OPTIONS.map((s) => {
-                  const active = editSpeeds.includes(s);
+                {(["auto", ...DNA_SPEED_OPTIONS.map(String)] as const).map((option) => {
+                  const isAuto = option === "auto";
+                  const active = isAuto ? editSpeeds.length > 1 : editSpeeds.length === 1 && editSpeeds[0] === Number(option);
                   return (
                     <Button
-                      key={s}
+                      key={option}
                       type="button"
                       size="sm"
                       variant={active ? "default" : "outline"}
                       className="h-7 text-xs"
                       aria-pressed={active}
-                      onClick={() =>
-                        setEditSpeeds((prev) =>
-                          prev.includes(s) ? prev.filter((v) => v !== s) : [...prev, s],
-                        )
-                      }
+                      onClick={() => setEditSpeeds(isAuto ? [...DNA_SPEED_OPTIONS] : [Number(option)])}
                     >
-                      {s}x
+                      {isAuto ? "Auto" : `${option}x`}
                     </Button>
                   );
                 })}
               </div>
-              {editSpeeds.length === 0 && (
-                <p className="text-[11px] text-destructive">
-                  At least one speed is needed — all four will be used if you leave this empty.
-                </p>
-              )}
+              <p className="text-[11px] text-muted-foreground">
+                {editSpeeds.length > 1
+                  ? "Auto: each render picks one of 1x, 1.5x, 1.7x or 2x for this clip."
+                  : `Every render uses this clip at ${editSpeeds[0] ?? 1}x.`}
+              </p>
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="tags">Tags (comma separated)</Label>
               <Input
