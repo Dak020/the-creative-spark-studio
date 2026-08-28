@@ -12,6 +12,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { HookPlacement } from "./browser-render";
 import { renderSequence, type SequenceSegment } from "./sequence-render";
+import { RenderCancelledError } from "./browser-render";
 import { resolveRenderUrl } from "./output";
 import { OUT_H, OUT_W, RENDER_BUCKET, type BatchItem, type RenderStage } from "./pipeline";
 import { solveForProject, type DnaSegment, type SolverClip } from "@/lib/dna/solver";
@@ -62,6 +63,7 @@ export type DnaVariantInput = {
   plan: DnaPlan;
   hook: { id: string; text: string };
   withAudio?: boolean;
+  signal?: AbortSignal | undefined;
   onUpdate?: (item: BatchItem) => void;
 };
 
@@ -164,6 +166,7 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
       text: hook.text,
       placement: plan.placement,
       withAudio: !!withAudio,
+      signal: input.signal,
       onProgress: (pct) => patch({ stage: "rendering", progress: Math.max(4, pct * 0.8) }),
     });
 
@@ -229,6 +232,19 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
       filename: `dna-${opener.filename.replace(/\.[^.]+$/, "")}.${extension}`,
     });
   } catch (e) {
+    if (e instanceof RenderCancelledError) {
+      patch({ stage: "failed", progress: 100, error: "Cancelled" });
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "cancelled",
+          progress: 100,
+          error_message: "Cancelled by user",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+      return item;
+    }
     const message = (e as Error).message || "Render failed.";
     patch({ stage: "failed", progress: 100, error: message });
     await supabase
@@ -253,6 +269,7 @@ export type DnaBatchInput = {
   targetDuration: number;
   quantity: number;
   withAudio?: boolean;
+  signal?: AbortSignal;
   onUpdate: (items: BatchItem[]) => void;
 };
 
@@ -262,11 +279,15 @@ export type DnaBatchInput = {
  * even though they all land on the same target duration.
  */
 export async function runDnaBatch(input: DnaBatchInput): Promise<BatchItem[]> {
-  const { clips, hooks, targetDuration, quantity } = input;
+  const { clips, hooks, targetDuration, quantity, signal } = input;
   if (hooks.length === 0) throw new Error("Select at least one hook.");
 
   const items: BatchItem[] = [];
   for (let i = 0; i < Math.max(1, quantity); i++) {
+    // Checked BEFORE starting each variant — a cancel mid-batch must stop the
+    // remaining queued variants from ever starting, not just interrupt
+    // whichever one happens to be rendering right now.
+    if (signal?.aborted) break;
     const planned = planDna(clips, targetDuration);
     if (!planned.ok) throw new Error(planned.reason);
     const hook = hooks[i % hooks.length]!;
@@ -276,6 +297,7 @@ export async function runDnaBatch(input: DnaBatchInput): Promise<BatchItem[]> {
       plan: planned.plan,
       hook,
       withAudio: !!input.withAudio,
+      signal,
       onUpdate: (updated) => {
         const idx = items.findIndex((b) => b.jobId === updated.jobId);
         if (idx >= 0) items[idx] = updated;
