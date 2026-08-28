@@ -16,6 +16,7 @@ import {
   layoutOverlay,
   pickMimeType,
   waitFor,
+  RenderCancelledError,
   type BrowserRenderResult,
   type HookPlacement,
 } from "./browser-render";
@@ -41,7 +42,15 @@ export type SequenceRenderOptions = {
   placement?: HookPlacement;
   withAudio?: boolean;
   onProgress?: (pct: number) => void;
+  /** Abort the render early — used for user-initiated cancellation. Checked
+   *  between segments and inside the per-segment frame loop so a cancel
+   *  actually stops within a second, not at the end of the current segment. */
+  signal?: AbortSignal | undefined;
 };
+
+export function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RenderCancelledError();
+}
 
 async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
   const video = document.createElement("video");
@@ -62,8 +71,9 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
 }
 
 export async function renderSequence(opts: SequenceRenderOptions): Promise<BrowserRenderResult> {
-  const { segments, width, height, text, withAudio } = opts;
+  const { segments, width, height, text, withAudio, signal } = opts;
   if (segments.length === 0) throw new Error("No segments to render.");
+  throwIfAborted(signal);
 
   try {
     if (typeof document !== "undefined" && "fonts" in document) {
@@ -110,14 +120,23 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
 
   const totalDuration = segments.reduce((s, seg) => s + seg.outputDuration, 0);
 
-  // Load every segment up front so cuts are instant (no black gap between them)
-  // and so all audio sources can be wired before recording starts — tracks
-  // added to a stream after MediaRecorder.start() are not captured.
-  const prepared: { video: HTMLVideoElement; start: number; seg: SequenceSegment }[] = [];
-  for (const seg of segments) {
-    const p = await prepareVideo(seg, !!withAudio);
-    prepared.push({ ...p, seg });
-  }
+  // Load every segment's video up front so cuts are instant (no black gap
+  // between them) and so all audio sources can be wired before recording
+  // starts — tracks added to a stream after MediaRecorder.start() are not
+  // captured. Loading them CONCURRENTLY (not one after another) matters: a
+  // DNA render can combine 2-3 full clips, and loading them sequentially
+  // meant the wait before any recording (or progress feedback) even began
+  // was the SUM of every clip's load time — which looked exactly like a
+  // stall, especially on a slower connection. Concurrent loading cuts that
+  // wait down to roughly the slowest single clip instead.
+  opts.onProgress?.(0);
+  const prepared = await Promise.all(
+    segments.map(async (seg) => {
+      const p = await prepareVideo(seg, !!withAudio);
+      return { ...p, seg };
+    }),
+  );
+  throwIfAborted(signal);
   if (withAudio) {
     for (const p of prepared) attachAudioTrack(p.video, captureStream);
   }
@@ -181,56 +200,84 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   drawFrame();
   recorder.start(200);
 
-  for (let index = 0; index < prepared.length; index++) {
-    const { video, start, seg } = prepared[index]!;
-    currentVideo = video;
-    // Hook ONLY over the opening segment of a DNA edit.
-    showHook = index === 0;
-    if (index > 0) {
-      video.currentTime = start;
-      await waitFor(video, "seeked");
-    }
-    const segStartedAt = performance.now();
-    await video.play();
+  try {
+    for (let index = 0; index < prepared.length; index++) {
+      throwIfAborted(signal);
+      const { video, start, seg } = prepared[index]!;
+      currentVideo = video;
+      // Hook ONLY over the opening segment of a DNA edit.
+      showHook = index === 0;
+      if (index > 0) {
+        video.currentTime = start;
+        await waitFor(video, "seeked");
+      }
+      const segStartedAt = performance.now();
+      await video.play();
 
-    await new Promise<void>((resolve) => {
-      let done = false;
-      let lastRafAt = performance.now();
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearInterval(timer);
-        resolve();
-      };
-      const tick = () => {
-        if (done) return;
-        // Stop advancing the source once the cut boundary is reached — the last
-        // frame is held for whatever wall-clock time remains, never looped.
-        if (video.ended || video.currentTime >= seg.sourceOut - 0.03) {
-          if (!video.paused) video.pause();
-        }
-        drawFrame();
-        const segElapsed = (performance.now() - segStartedAt) / 1000;
-        const pct = ((elapsedBefore + segElapsed) / totalDuration) * 100;
-        opts.onProgress?.(Math.min(99, Math.round(pct)));
-        if (segElapsed >= seg.outputDuration) finish();
-      };
-      const FALLBACK_GAP_MS = 120;
-      const timer = setInterval(() => {
-        if (done) return;
-        if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) tick();
-      }, 1000 / 30);
-      const raf = () => {
-        if (done) return;
-        lastRafAt = performance.now();
-        tick();
+      await new Promise<void>((resolve, reject) => {
+        let done = false;
+        let lastRafAt = performance.now();
+        const finish = () => {
+          if (done) return;
+          done = true;
+          clearInterval(timer);
+          resolve();
+        };
+        const cancel = () => {
+          if (done) return;
+          done = true;
+          clearInterval(timer);
+          reject(new RenderCancelledError());
+        };
+        const tick = () => {
+          if (done) return;
+          if (signal?.aborted) {
+            cancel();
+            return;
+          }
+          // Stop advancing the source once the cut boundary is reached — the last
+          // frame is held for whatever wall-clock time remains, never looped.
+          if (video.ended || video.currentTime >= seg.sourceOut - 0.03) {
+            if (!video.paused) video.pause();
+          }
+          drawFrame();
+          const segElapsed = (performance.now() - segStartedAt) / 1000;
+          const pct = ((elapsedBefore + segElapsed) / totalDuration) * 100;
+          opts.onProgress?.(Math.min(99, Math.round(pct)));
+          if (segElapsed >= seg.outputDuration) finish();
+        };
+        const FALLBACK_GAP_MS = 120;
+        const timer = setInterval(() => {
+          if (done) return;
+          if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) tick();
+        }, 1000 / 30);
+        const raf = () => {
+          if (done) return;
+          lastRafAt = performance.now();
+          tick();
+          if (!done) requestAnimationFrame(raf);
+        };
         requestAnimationFrame(raf);
-      };
-      requestAnimationFrame(raf);
-    });
+        // Also react immediately to an abort fired between frames, instead
+        // of waiting for the next tick (~33ms fallback, or up to one rAF).
+        signal?.addEventListener("abort", cancel, { once: true });
+      });
 
-    video.pause();
-    elapsedBefore += seg.outputDuration;
+      video.pause();
+      elapsedBefore += seg.outputDuration;
+    }
+  } catch (e) {
+    // Cancelled mid-render: stop the recorder and tear everything down, but
+    // never write out a partial file — the caller checks for this error and
+    // skips the upload step entirely.
+    if (recorder.state !== "inactive") recorder.stop();
+    captureStream.getTracks().forEach((t) => t.stop());
+    if (captureStream !== stream) stream.getTracks().forEach((t) => t.stop());
+    prepared.forEach((p) => {
+      p.video.pause();
+      p.video.src = "";
+    });
+    throw e;
   }
 
   const thumbnail = await new Promise<Blob | null>((resolve) => {
