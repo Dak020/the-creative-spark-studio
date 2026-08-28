@@ -24,7 +24,22 @@ export type BrowserRenderOptions = {
   /** Keep the clip's original audio in the exported file. */
   withAudio?: boolean;
   onProgress?: (pct: number) => void;
+  /** Abort the render early — used for user-initiated cancellation. */
+  signal?: AbortSignal | undefined;
 };
+
+/** Thrown when a render is stopped via its AbortSignal, so callers can tell
+ *  a user cancellation apart from a genuine render failure. */
+export class RenderCancelledError extends Error {
+  constructor() {
+    super("Render cancelled.");
+    this.name = "RenderCancelledError";
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RenderCancelledError();
+}
 
 /**
  * Route a video element's audio into a recordable stream WITHOUT sending it to
@@ -175,7 +190,8 @@ export function waitFor(el: HTMLVideoElement, event: string) {
 
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
-  const { sourceUrl, durationSeconds, width, height, text, withAudio } = opts;
+  const { sourceUrl, durationSeconds, width, height, text, withAudio, signal } = opts;
+  throwIfAborted(signal);
 
   // layoutOverlay measures text to decide wrapping and font size, and
   // drawFrame paints with the same font string — but if the "Inter" webfont
@@ -339,48 +355,67 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
   const startedAt = performance.now();
   await video.play();
 
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let done = false;
+      let lastRafAt = performance.now();
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        resolve();
+      };
+      const cancel = () => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        reject(new RenderCancelledError());
+      };
 
-  await new Promise<void>((resolve) => {
-    let done = false;
-    let lastRafAt = performance.now();
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearInterval(timer);
-      resolve();
-    };
-
-    const tick = () => {
-      if (done) return;
-      // When the source runs out we keep drawing its final frame so the export
-      // is always exactly `durationSeconds` long.
-      if (video.ended || video.currentTime >= start + durationSeconds - 0.03) {
-        if (!video.paused) video.pause();
-      }
-      drawFrame();
-      const elapsed = (performance.now() - startedAt) / 1000;
-      opts.onProgress?.(Math.min(99, Math.round((elapsed / durationSeconds) * 100)));
-      if (elapsed >= durationSeconds) finish();
-    };
-    // requestAnimationFrame is the primary driver — it's tied to real paint
-    // timing, so frames come out evenly spaced. The interval is a fallback
-    // ONLY: it steps in solely if rAF has gone quiet (a backgrounded tab
-    // throttles rAF), so the two never draw/capture the same moment twice.
-    const FALLBACK_GAP_MS = 120;
-    const timer = setInterval(() => {
-      if (done) return;
-      if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) {
+      const tick = () => {
+        if (done) return;
+        if (signal?.aborted) {
+          cancel();
+          return;
+        }
+        // When the source runs out we keep drawing its final frame so the export
+        // is always exactly `durationSeconds` long.
+        if (video.ended || video.currentTime >= start + durationSeconds - 0.03) {
+          if (!video.paused) video.pause();
+        }
+        drawFrame();
+        const elapsed = (performance.now() - startedAt) / 1000;
+        opts.onProgress?.(Math.min(99, Math.round((elapsed / durationSeconds) * 100)));
+        if (elapsed >= durationSeconds) finish();
+      };
+      // requestAnimationFrame is the primary driver — it's tied to real paint
+      // timing, so frames come out evenly spaced. The interval is a fallback
+      // ONLY: it steps in solely if rAF has gone quiet (a backgrounded tab
+      // throttles rAF), so the two never draw/capture the same moment twice.
+      const FALLBACK_GAP_MS = 120;
+      const timer = setInterval(() => {
+        if (done) return;
+        if (performance.now() - lastRafAt >= FALLBACK_GAP_MS) {
+          tick();
+        }
+      }, 1000 / 30);
+      const raf = () => {
+        if (done) return;
+        lastRafAt = performance.now();
         tick();
-      }
-    }, 1000 / 30);
-    const raf = () => {
-      if (done) return;
-      lastRafAt = performance.now();
-      tick();
+        if (!done) requestAnimationFrame(raf);
+      };
       requestAnimationFrame(raf);
-    };
-    requestAnimationFrame(raf);
-  });
+      signal?.addEventListener("abort", cancel, { once: true });
+    });
+  } catch (e) {
+    if (recorder.state !== "inactive") recorder.stop();
+    captureStreamToUse.getTracks().forEach((t) => t.stop());
+    if (captureStreamToUse !== stream) stream.getTracks().forEach((t) => t.stop());
+    video.pause();
+    video.src = "";
+    throw e;
+  }
 
 
   // Poster frame (with the overlay already composited) for the result card.
