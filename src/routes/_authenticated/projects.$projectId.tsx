@@ -461,6 +461,10 @@ function ProjectWorkspace() {
   const requested = live.length;
   const completed = live.filter((l) => l.stage === "completed").length;
   const failed = live.filter((l) => l.stage === "failed");
+  const queuedCount = (data?.jobs ?? []).filter(
+    (j) => j.status === "queued" || j.status === "processing",
+  ).length;
+
 
   return (
     <div className="space-y-8">
