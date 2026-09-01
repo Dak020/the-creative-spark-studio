@@ -419,6 +419,17 @@ function ProjectWorkspace() {
     dnaAbortRef.current?.abort();
   }
 
+  async function clearQueue() {
+    if (!user) return;
+    batchAbortRef.current?.abort();
+    dnaAbortRef.current?.abort();
+    const ok = await cancelQueuedJobs(user.id, projectId);
+    await qc.invalidateQueries({ queryKey: ["project", projectId] });
+    if (ok) toast.info("Queued renders cancelled.");
+    else toast.error("Could not cancel the queued renders.");
+  }
+
+
 
 
   if (isLoading) {
