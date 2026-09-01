@@ -169,7 +169,11 @@ export function layoutOverlay(
 }
 
 
-export function waitFor(el: HTMLVideoElement, event: string) {
+export function waitFor(
+  el: HTMLVideoElement,
+  event: string,
+  opts?: { signal?: AbortSignal | undefined; timeoutMs?: number },
+) {
   return new Promise<void>((resolve, reject) => {
     const ok = () => {
       cleanup();
@@ -179,14 +183,32 @@ export function waitFor(el: HTMLVideoElement, event: string) {
       cleanup();
       reject(new Error(`Video failed to ${event}.`));
     };
+    // A cancel must interrupt loading/seeking too — otherwise the UI sits on
+    // "loading" while a stalled network fetch never settles.
+    const onAbort = () => {
+      cleanup();
+      reject(new RenderCancelledError());
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for the clip to ${event}.`));
+    }, opts?.timeoutMs ?? 45_000);
     const cleanup = () => {
+      clearTimeout(timeout);
       el.removeEventListener(event, ok);
       el.removeEventListener("error", fail);
+      opts?.signal?.removeEventListener("abort", onAbort);
     };
+    if (opts?.signal?.aborted) {
+      onAbort();
+      return;
+    }
     el.addEventListener(event, ok, { once: true });
     el.addEventListener("error", fail, { once: true });
+    opts?.signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
+
 
 
 export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
