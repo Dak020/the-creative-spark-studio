@@ -26,6 +26,8 @@ import {
   CLIP_SECONDS,
   STAGE_LABEL,
   reapStaleJobs,
+  cancelQueuedJobs,
+
   runBatch,
   runMultiClipBatch,
   type BatchItem,
@@ -419,6 +421,17 @@ function ProjectWorkspace() {
     dnaAbortRef.current?.abort();
   }
 
+  async function clearQueue() {
+    if (!user) return;
+    batchAbortRef.current?.abort();
+    dnaAbortRef.current?.abort();
+    const ok = await cancelQueuedJobs(user.id, projectId);
+    await qc.invalidateQueries({ queryKey: ["project", projectId] });
+    if (ok) toast.info("Queued renders cancelled.");
+    else toast.error("Could not cancel the queued renders.");
+  }
+
+
 
 
   if (isLoading) {
@@ -448,6 +461,10 @@ function ProjectWorkspace() {
   const requested = live.length;
   const completed = live.filter((l) => l.stage === "completed").length;
   const failed = live.filter((l) => l.stage === "failed");
+  const queuedCount = (data?.jobs ?? []).filter(
+    (j) => j.status === "queued" || j.status === "processing",
+  ).length;
+
 
   return (
     <div className="space-y-8">
@@ -518,12 +535,20 @@ function ProjectWorkspace() {
           value={(data?.videos ?? []).filter((v) => v.playbackUrl).length}
           icon={Trophy}
         />
-        <StatCard
-          label="Queue"
-          value={(data?.jobs ?? []).filter((j) => j.status === "queued" || j.status === "processing").length}
-          icon={Loader2}
-        />
+        <div className="space-y-2">
+          <StatCard
+            label="Queue"
+            value={queuedCount}
+            icon={Loader2}
+          />
+          {queuedCount > 0 ? (
+            <Button variant="outline" size="sm" className="w-full" onClick={() => void clearQueue()}>
+              Cancel {queuedCount} queued render{queuedCount === 1 ? "" : "s"}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
 
       {requested > 0 ? (
         <div className="panel px-5 py-4 text-xs">

@@ -205,8 +205,9 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
       throwIfAborted(signal);
       const { video, start, seg } = prepared[index]!;
       currentVideo = video;
-      // Hook ONLY over the opening segment of a DNA edit.
-      showHook = index === 0;
+      // Hook stays burned in for the WHOLE edit, not just the opening cut.
+      showHook = true;
+
       if (index > 0) {
         video.currentTime = start;
         await waitFor(video, "seeked");
