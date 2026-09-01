@@ -591,3 +591,20 @@ export async function reapStaleJobs(userId: string, projectId?: string) {
   if (error) return 0;
   return 1;
 }
+
+/** Cancel every queued/processing job for this user (optionally one project). */
+export async function cancelQueuedJobs(userId: string, projectId?: string) {
+  let q = supabase
+    .from("render_jobs")
+    .update({
+      status: "cancelled",
+      progress: 100,
+      error_message: "Cancelled by user",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .in("status", ["queued", "processing"]);
+  if (projectId) q = q.eq("project_id", projectId);
+  const { error } = await q;
+  return !error;
+}
