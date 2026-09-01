@@ -52,7 +52,7 @@ export function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new RenderCancelledError();
 }
 
-async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
+async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: AbortSignal) {
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = !withAudio;
@@ -60,15 +60,23 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
   video.playsInline = true;
   video.preload = "auto";
   video.src = seg.url;
-  await waitFor(video, "loadedmetadata");
-  const realDuration = Number.isFinite(video.duration) ? video.duration : seg.sourceOut;
-  // Hard rule: never read past what the clip actually has.
-  const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
-  video.currentTime = start;
-  await waitFor(video, "seeked");
-  video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
-  return { video, start };
+  try {
+    await waitFor(video, "loadedmetadata", { signal });
+    const realDuration = Number.isFinite(video.duration) ? video.duration : seg.sourceOut;
+    // Hard rule: never read past what the clip actually has.
+    const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
+    video.currentTime = start;
+    await waitFor(video, "seeked", { signal });
+    video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
+    return { video, start };
+  } catch (e) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    throw e;
+  }
 }
+
 
 export async function renderSequence(opts: SequenceRenderOptions): Promise<BrowserRenderResult> {
   const { segments, width, height, text, withAudio, signal } = opts;
@@ -132,10 +140,11 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   opts.onProgress?.(0);
   const prepared = await Promise.all(
     segments.map(async (seg) => {
-      const p = await prepareVideo(seg, !!withAudio);
+      const p = await prepareVideo(seg, !!withAudio, signal);
       return { ...p, seg };
     }),
   );
+
   throwIfAborted(signal);
   if (withAudio) {
     for (const p of prepared) attachAudioTrack(p.video, captureStream);
@@ -184,18 +193,27 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   }
 
   // Warm the first segment's decoder before opening the recorder, otherwise the
-  // opening chunk can land on a blank pre-play frame.
+  // opening chunk can land on a blank pre-play frame. The wait is capped so a
+  // decoder that never produces a frame can't hang the whole render.
   await currentVideo.play();
   await new Promise<void>((resolve) => {
+    const done = () => resolve();
+    const t = setTimeout(done, 4000);
+    const finish = () => {
+      clearTimeout(t);
+      done();
+    };
     if (typeof currentVideo.requestVideoFrameCallback === "function") {
-      currentVideo.requestVideoFrameCallback(() => resolve());
+      currentVideo.requestVideoFrameCallback(() => finish());
     } else {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      requestAnimationFrame(() => requestAnimationFrame(() => finish()));
     }
   });
+  throwIfAborted(signal);
   currentVideo.pause();
   currentVideo.currentTime = prepared[0]!.start;
-  await waitFor(currentVideo, "seeked");
+  await waitFor(currentVideo, "seeked", { signal, timeoutMs: 15_000 });
+
 
   drawFrame();
   recorder.start(200);
@@ -210,7 +228,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
 
       if (index > 0) {
         video.currentTime = start;
-        await waitFor(video, "seeked");
+        await waitFor(video, "seeked", { signal, timeoutMs: 15_000 });
       }
       const segStartedAt = performance.now();
       await video.play();

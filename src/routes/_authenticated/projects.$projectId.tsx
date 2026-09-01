@@ -74,6 +74,8 @@ function ProjectWorkspace() {
   const [quantityChoice, setQuantityChoice] = useState("5");
   const [customQuantity, setCustomQuantity] = useState("8");
   const [live, setLive] = useState<BatchItem[]>([]);
+  const [showJobHistory, setShowJobHistory] = useState(false);
+
   // Same multi-clip rule as Studio: with 2+ clips selected, one batch is split
   // evenly across them (remainder randomly assigned). Defaults to every clip
   // in the project's media library.
@@ -286,8 +288,13 @@ function ProjectWorkspace() {
   }
 
   function cancelBatch() {
-    batchAbortRef.current?.abort();
+    if (!batchAbortRef.current) return;
+    batchAbortRef.current.abort();
+    batchAbortRef.current = null;
+    setRunning(false);
+    toast.info("Render cancelled.");
   }
+
 
 
 
@@ -418,8 +425,17 @@ function ProjectWorkspace() {
   }
 
   function cancelDna() {
-    dnaAbortRef.current?.abort();
+    if (!dnaAbortRef.current) return;
+    dnaAbortRef.current.abort();
+    dnaAbortRef.current = null;
+    // Don't wait for the render loop to unwind before the UI reacts — the
+    // button should stop spinning the moment it is tapped.
+    setDnaRunning(false);
+    setDnaLive([]);
+    toast.info("DNA render cancelled.");
+    if (user) void cancelQueuedJobs(user.id, projectId).then(() => qc.invalidateQueries({ queryKey: ["project", projectId] }));
   }
+
 
   async function clearQueue() {
     if (!user) return;
@@ -756,23 +772,41 @@ function ProjectWorkspace() {
 
         <TabsContent value="renders" className="space-y-6 pt-6">
           <div className="panel divide-y divide-border overflow-hidden">
-            {(data?.jobs.length ?? 0) === 0 ? (
+            {activeJobs.length + finishedJobs.length === 0 ? (
               <p className="px-5 py-8 text-center text-xs text-muted-foreground">No render jobs yet.</p>
             ) : (
-              data?.jobs.map((j) => (
-                <div key={j.id} className="px-5 py-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-xs text-muted-foreground">{j.id.slice(0, 8)}</span>
-                    <StatusPill status={j.status} />
+              <>
+                {[...activeJobs, ...(showJobHistory ? finishedJobs : finishedJobs.slice(0, 1))].map((j) => (
+                  <div key={j.id} className="px-5 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-xs text-muted-foreground">{j.id.slice(0, 8)}</span>
+                      <StatusPill status={j.status} />
+                    </div>
+                    <Progress value={j.progress} className="mt-3 h-1.5" />
+                    {j.error_message ? (
+                      <p className="mt-2 text-[11px] text-destructive">{j.error_message}</p>
+                    ) : null}
                   </div>
-                  <Progress value={j.progress} className="mt-3 h-1.5" />
-                  {j.error_message ? (
-                    <p className="mt-2 text-[11px] text-destructive">{j.error_message}</p>
-                  ) : null}
-                </div>
-              ))
+                ))}
+                {finishedJobs.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowJobHistory((v) => !v)}
+                    className="flex w-full items-center justify-center gap-1.5 px-5 py-3 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {showJobHistory
+                      ? "Hide history"
+                      : `History — ${finishedJobs.length - 1} more`}
+                    <ChevronDown
+                      className={`size-3.5 transition-transform ${showJobHistory ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                ) : null}
+              </>
             )}
           </div>
+
+
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {data?.videos.map((v) => (
