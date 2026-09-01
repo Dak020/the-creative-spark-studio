@@ -26,6 +26,8 @@ import {
   CLIP_SECONDS,
   STAGE_LABEL,
   reapStaleJobs,
+  cancelQueuedJobs,
+
   runBatch,
   runMultiClipBatch,
   type BatchItem,
