@@ -286,8 +286,13 @@ function ProjectWorkspace() {
   }
 
   function cancelBatch() {
-    batchAbortRef.current?.abort();
+    if (!batchAbortRef.current) return;
+    batchAbortRef.current.abort();
+    batchAbortRef.current = null;
+    setRunning(false);
+    toast.info("Render cancelled.");
   }
+
 
 
 
