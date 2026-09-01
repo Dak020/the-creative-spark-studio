@@ -193,18 +193,27 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   }
 
   // Warm the first segment's decoder before opening the recorder, otherwise the
-  // opening chunk can land on a blank pre-play frame.
+  // opening chunk can land on a blank pre-play frame. The wait is capped so a
+  // decoder that never produces a frame can't hang the whole render.
   await currentVideo.play();
   await new Promise<void>((resolve) => {
+    const done = () => resolve();
+    const t = setTimeout(done, 4000);
+    const finish = () => {
+      clearTimeout(t);
+      done();
+    };
     if (typeof currentVideo.requestVideoFrameCallback === "function") {
-      currentVideo.requestVideoFrameCallback(() => resolve());
+      currentVideo.requestVideoFrameCallback(() => finish());
     } else {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      requestAnimationFrame(() => requestAnimationFrame(() => finish()));
     }
   });
+  throwIfAborted(signal);
   currentVideo.pause();
   currentVideo.currentTime = prepared[0]!.start;
-  await waitFor(currentVideo, "seeked");
+  await waitFor(currentVideo, "seeked", { signal, timeoutMs: 15_000 });
+
 
   drawFrame();
   recorder.start(200);
