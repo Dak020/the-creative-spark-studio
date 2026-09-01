@@ -52,7 +52,7 @@ export function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new RenderCancelledError();
 }
 
-async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
+async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: AbortSignal) {
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = !withAudio;
@@ -60,15 +60,23 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean) {
   video.playsInline = true;
   video.preload = "auto";
   video.src = seg.url;
-  await waitFor(video, "loadedmetadata");
-  const realDuration = Number.isFinite(video.duration) ? video.duration : seg.sourceOut;
-  // Hard rule: never read past what the clip actually has.
-  const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
-  video.currentTime = start;
-  await waitFor(video, "seeked");
-  video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
-  return { video, start };
+  try {
+    await waitFor(video, "loadedmetadata", { signal });
+    const realDuration = Number.isFinite(video.duration) ? video.duration : seg.sourceOut;
+    // Hard rule: never read past what the clip actually has.
+    const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
+    video.currentTime = start;
+    await waitFor(video, "seeked", { signal });
+    video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
+    return { video, start };
+  } catch (e) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    throw e;
+  }
 }
+
 
 export async function renderSequence(opts: SequenceRenderOptions): Promise<BrowserRenderResult> {
   const { segments, width, height, text, withAudio, signal } = opts;
