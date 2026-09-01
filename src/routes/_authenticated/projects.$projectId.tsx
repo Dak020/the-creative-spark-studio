@@ -418,8 +418,17 @@ function ProjectWorkspace() {
   }
 
   function cancelDna() {
-    dnaAbortRef.current?.abort();
+    if (!dnaAbortRef.current) return;
+    dnaAbortRef.current.abort();
+    dnaAbortRef.current = null;
+    // Don't wait for the render loop to unwind before the UI reacts — the
+    // button should stop spinning the moment it is tapped.
+    setDnaRunning(false);
+    setDnaLive([]);
+    toast.info("DNA render cancelled.");
+    if (user) void cancelQueuedJobs(user.id, projectId).then(() => qc.invalidateQueries({ queryKey: ["project", projectId] }));
   }
+
 
   async function clearQueue() {
     if (!user) return;
