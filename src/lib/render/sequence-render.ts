@@ -228,7 +228,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
 
       if (index > 0) {
         video.currentTime = start;
-        await waitFor(video, "seeked");
+        await waitFor(video, "seeked", { signal, timeoutMs: 15_000 });
       }
       const segStartedAt = performance.now();
       await video.play();
