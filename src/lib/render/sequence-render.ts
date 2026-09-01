@@ -140,10 +140,11 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   opts.onProgress?.(0);
   const prepared = await Promise.all(
     segments.map(async (seg) => {
-      const p = await prepareVideo(seg, !!withAudio);
+      const p = await prepareVideo(seg, !!withAudio, signal);
       return { ...p, seg };
     }),
   );
+
   throwIfAborted(signal);
   if (withAudio) {
     for (const p of prepared) attachAudioTrack(p.video, captureStream);
