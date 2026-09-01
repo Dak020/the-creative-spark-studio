@@ -531,12 +531,20 @@ function ProjectWorkspace() {
           value={(data?.videos ?? []).filter((v) => v.playbackUrl).length}
           icon={Trophy}
         />
-        <StatCard
-          label="Queue"
-          value={(data?.jobs ?? []).filter((j) => j.status === "queued" || j.status === "processing").length}
-          icon={Loader2}
-        />
+        <div className="space-y-2">
+          <StatCard
+            label="Queue"
+            value={queuedCount}
+            icon={Loader2}
+          />
+          {queuedCount > 0 ? (
+            <Button variant="outline" size="sm" className="w-full" onClick={() => void clearQueue()}>
+              Cancel {queuedCount} queued render{queuedCount === 1 ? "" : "s"}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
 
       {requested > 0 ? (
         <div className="panel px-5 py-4 text-xs">
