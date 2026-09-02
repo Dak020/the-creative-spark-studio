@@ -2,7 +2,7 @@
  * Hook creative services. All creative reasoning lives here; the video engine
  * stays deterministic.
  */
-import { getAiProvider, type ChatMessage } from "./provider.server";
+import { getAiProvider, type AiProvider, type ChatMessage } from "./provider.server";
 
 export type WinningHookInput = {
   text: string;
@@ -45,9 +45,9 @@ Rules:
 };
 
 /** Analyze the structural DNA of a set of winning hooks. */
-export async function analyzeHookStructure(hooks: WinningHookInput[]) {
+export async function analyzeHookStructure(hooks: WinningHookInput[], provider?: AiProvider) {
   if (hooks.length === 0) return [] as Array<{ text: string; structure: string; emotional_trigger: string; format: string }>;
-  const ai = getAiProvider();
+  const ai = provider ?? getAiProvider();
   return ai.completeJson<Array<{ text: string; structure: string; emotional_trigger: string; format: string }>>([
     SYSTEM,
     {
@@ -63,9 +63,9 @@ Return JSON: [{"text":"","structure":"","emotional_trigger":"","format":""}]`,
 }
 
 /** Generate original hook variants patterned on (never copied from) winners. */
-export async function generateHookVariants(input: GenerateHooksInput): Promise<GeneratedHook[]> {
-  const ai = getAiProvider();
-  const analysis = input.winners.length ? await analyzeHookStructure(input.winners) : [];
+export async function generateHookVariants(input: GenerateHooksInput, provider?: AiProvider): Promise<GeneratedHook[]> {
+  const ai = provider ?? getAiProvider();
+  const analysis = input.winners.length ? await analyzeHookStructure(input.winners, ai) : [];
 
   const raw = await ai.completeJson<{ hooks: GeneratedHook[] } | GeneratedHook[]>([
     SYSTEM,
@@ -102,14 +102,14 @@ score = your 0-100 prediction of stopping power.`,
 }
 
 /** Public entry point used by the server function. */
-export async function generateHooks(input: GenerateHooksInput) {
-  return generateHookVariants(input);
+export async function generateHooks(input: GenerateHooksInput, provider?: AiProvider) {
+  return generateHookVariants(input, provider);
 }
 
 /** Re-score existing hook texts against an audience/platform. */
-export async function scoreHooks(texts: string[], audience: string, platform: string) {
+export async function scoreHooks(texts: string[], audience: string, platform: string, provider?: AiProvider) {
   if (texts.length === 0) return [];
-  const ai = getAiProvider();
+  const ai = provider ?? getAiProvider();
   const raw = await ai.completeJson<{ scores: Array<{ text: string; score: number; rationale: string }> }>([
     SYSTEM,
     {
