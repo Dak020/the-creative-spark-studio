@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_credentials: {
+        Row: {
+          api_key: string
+          base_url: string
+          created_at: string
+          id: string
+          is_active: boolean
+          key_hint: string
+          label: string
+          model: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key: string
+          base_url: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key_hint?: string
+          label?: string
+          model: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key?: string
+          base_url?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key_hint?: string
+          label?: string
+          model?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       dna_recipes: {
         Row: {
           created_at: string
