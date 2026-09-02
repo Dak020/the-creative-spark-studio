@@ -20,6 +20,14 @@ export const DNA_SPEEDS = [1.0, 1.5, 1.7, 2.0] as const;
 export const MIN_SEGMENT_SECONDS = 0.5;
 export const DURATION_TOLERANCE = 0.05;
 
+/**
+ * The opening segment carries the hook, so it is never a random sliver or a
+ * sprawling half of the edit. It stays inside a tight, readable window and
+ * always starts at the very beginning of the source clip.
+ */
+export const START_MIN_SECONDS = 1.2;
+export const START_MAX_SECONDS = 3;
+
 export type SolverClip = {
   id: string;
   role: DnaRole;
@@ -165,11 +173,17 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const speeds = clips.map((c) => pick(c.allowedSpeeds));
-    const bounds: Bounds[] = clips.map((c, i) => ({
-      min: MIN_SEGMENT_SECONDS,
+    const bounds: Bounds[] = clips.map((c, i) => {
       // Never more real footage than the clip actually has.
-      max: c.duration / speeds[i]!,
-    }));
+      const capacity = c.duration / speeds[i]!;
+      if (c.role !== "start" || clips.length === 1) {
+        return { min: MIN_SEGMENT_SECONDS, max: capacity };
+      }
+      // Opening segment: clamped to the hook window, but always feasible.
+      const min = Math.min(Math.max(MIN_SEGMENT_SECONDS, START_MIN_SECONDS), capacity);
+      const max = Math.max(min, Math.min(capacity, START_MAX_SECONDS));
+      return { min, max };
+    });
     const split = randomSplit(target, bounds);
     if (!split) continue;
 
@@ -178,7 +192,9 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
       const outputDuration = split[i]!;
       const sourceSpan = Math.min(c.duration, outputDuration * speed);
       const maxStart = Math.max(0, c.duration - sourceSpan);
-      const sourceIn = round2(Math.random() * maxStart);
+      // The opener always starts at 0 so the hook lands on the clip's real
+      // first frame instead of a random mid-clip jump cut.
+      const sourceIn = c.role === "start" ? 0 : round2(Math.random() * maxStart);
       const sourceOut = round2(Math.min(c.duration, sourceIn + sourceSpan));
       return {
         media_asset_id: c.id,
@@ -195,7 +211,11 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
     const total = segments.reduce((s, seg) => s + seg.output_duration, 0);
     const drift = round2(target - total);
     if (Math.abs(drift) > 1e-9) {
-      const idx = segments.reduce((best, seg, i) => (seg.output_duration > segments[best]!.output_duration ? i : best), 0);
+      // Prefer a non-start segment so the opener keeps its clamped length.
+      const candidates = segments.some((s) => s.role !== "start")
+        ? segments.map((s, i) => [s, i] as const).filter(([s]) => s.role !== "start")
+        : segments.map((s, i) => [s, i] as const);
+      const idx = candidates.reduce((best, [seg, i]) => (seg.output_duration > segments[best]!.output_duration ? i : best), candidates[0]![1]);
       const seg = segments[idx]!;
       const clip = clips[idx]!;
       const newOut = round2(seg.source_in + (seg.output_duration + drift) * seg.speed);
