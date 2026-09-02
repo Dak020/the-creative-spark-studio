@@ -173,11 +173,17 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const speeds = clips.map((c) => pick(c.allowedSpeeds));
-    const bounds: Bounds[] = clips.map((c, i) => ({
-      min: MIN_SEGMENT_SECONDS,
+    const bounds: Bounds[] = clips.map((c, i) => {
       // Never more real footage than the clip actually has.
-      max: c.duration / speeds[i]!,
-    }));
+      const capacity = c.duration / speeds[i]!;
+      if (c.role !== "start" || clips.length === 1) {
+        return { min: MIN_SEGMENT_SECONDS, max: capacity };
+      }
+      // Opening segment: clamped to the hook window, but always feasible.
+      const min = Math.min(Math.max(MIN_SEGMENT_SECONDS, START_MIN_SECONDS), capacity);
+      const max = Math.max(min, Math.min(capacity, START_MAX_SECONDS));
+      return { min, max };
+    });
     const split = randomSplit(target, bounds);
     if (!split) continue;
 
