@@ -211,7 +211,11 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
     const total = segments.reduce((s, seg) => s + seg.output_duration, 0);
     const drift = round2(target - total);
     if (Math.abs(drift) > 1e-9) {
-      const idx = segments.reduce((best, seg, i) => (seg.output_duration > segments[best]!.output_duration ? i : best), 0);
+      // Prefer a non-start segment so the opener keeps its clamped length.
+      const candidates = segments.some((s) => s.role !== "start")
+        ? segments.map((s, i) => [s, i] as const).filter(([s]) => s.role !== "start")
+        : segments.map((s, i) => [s, i] as const);
+      const idx = candidates.reduce((best, [seg, i]) => (seg.output_duration > segments[best]!.output_duration ? i : best), candidates[0]![1]);
       const seg = segments[idx]!;
       const clip = clips[idx]!;
       const newOut = round2(seg.source_in + (seg.output_duration + drift) * seg.speed);
