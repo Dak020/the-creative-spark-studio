@@ -192,7 +192,9 @@ export function solveDna(orderedClips: SolverClip[], targetDuration: number, att
       const outputDuration = split[i]!;
       const sourceSpan = Math.min(c.duration, outputDuration * speed);
       const maxStart = Math.max(0, c.duration - sourceSpan);
-      const sourceIn = round2(Math.random() * maxStart);
+      // The opener always starts at 0 so the hook lands on the clip's real
+      // first frame instead of a random mid-clip jump cut.
+      const sourceIn = c.role === "start" ? 0 : round2(Math.random() * maxStart);
       const sourceOut = round2(Math.min(c.duration, sourceIn + sourceSpan));
       return {
         media_asset_id: c.id,
