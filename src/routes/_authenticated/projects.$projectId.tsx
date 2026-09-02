@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Download, Loader2, Play, Sparkles, Trophy } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, Loader2, Play, Sparkles, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { MediaLibraryPanel } from "@/components/MediaLibraryPanel";
@@ -477,9 +477,10 @@ function ProjectWorkspace() {
   const requested = live.length;
   const completed = live.filter((l) => l.stage === "completed").length;
   const failed = live.filter((l) => l.stage === "failed");
-  const queuedCount = (data?.jobs ?? []).filter(
-    (j) => j.status === "queued" || j.status === "processing",
-  ).length;
+  const allJobs = data?.jobs ?? [];
+  const activeJobs = allJobs.filter((j) => j.status === "queued" || j.status === "processing");
+  const finishedJobs = allJobs.filter((j) => j.status !== "queued" && j.status !== "processing");
+  const queuedCount = activeJobs.length;
 
 
   return (
