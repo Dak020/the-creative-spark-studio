@@ -20,6 +20,14 @@ export const DNA_SPEEDS = [1.0, 1.5, 1.7, 2.0] as const;
 export const MIN_SEGMENT_SECONDS = 0.5;
 export const DURATION_TOLERANCE = 0.05;
 
+/**
+ * The opening segment carries the hook, so it is never a random sliver or a
+ * sprawling half of the edit. It stays inside a tight, readable window and
+ * always starts at the very beginning of the source clip.
+ */
+export const START_MIN_SECONDS = 1.2;
+export const START_MAX_SECONDS = 3;
+
 export type SolverClip = {
   id: string;
   role: DnaRole;
