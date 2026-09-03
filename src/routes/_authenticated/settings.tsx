@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { VIDEO_DEFAULTS } from "@/lib/constants";
 import { formatBytes } from "@/lib/db";
+import { AiProviderSettings } from "@/components/AiProviderSettings";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
