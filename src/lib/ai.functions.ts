@@ -38,6 +38,8 @@ export const generateHooksFn = createServerFn({ method: "POST" })
     }
 
     const { generateHooks } = await import("./ai/hooks-service.server");
+    const { getProviderForUser } = await import("./ai/provider.server");
+    const provider = await getProviderForUser(userId);
     const generated = await generateHooks({
       product: data.product,
       productUrl: data.productUrl ?? null,
