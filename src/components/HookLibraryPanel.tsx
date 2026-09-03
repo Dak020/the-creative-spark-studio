@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Quote, Plus, Search, Trash2, Trophy, Pencil, Sparkles } from "lucide-react";
+import { Quote, Plus, Search, Trash2, Trophy, Pencil, Sparkles, BrainCircuit } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { HOOK_CATEGORIES, PLATFORMS } from "@/lib/constants";
 import { fmtNumber } from "@/lib/db";
@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { HookGeneratorDialog } from "@/components/HookGeneratorDialog";
+import { StudyWinnersDialog } from "@/components/StudyWinnersDialog";
 
 export type Hook = {
   id: string;
@@ -64,6 +65,7 @@ export function HookLibraryPanel({
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
+  const [studyOpen, setStudyOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyHook });
 
@@ -187,6 +189,10 @@ export function HookLibraryPanel({
         >
           <Trophy className="size-4" />
           Winners
+        </Button>
+        <Button variant="outline" onClick={() => setStudyOpen(true)}>
+          <BrainCircuit className="size-4" />
+          Study winners
         </Button>
         <Button variant="secondary" onClick={() => setGenOpen(true)}>
           <Sparkles className="size-4" />
@@ -401,6 +407,14 @@ export function HookLibraryPanel({
         projectId={projectId ?? null}
         winners={(hooks ?? []).filter((h) => h.is_winner)}
         defaults={generatorContext}
+      />
+
+      <StudyWinnersDialog
+        open={studyOpen}
+        onOpenChange={setStudyOpen}
+        projectId={projectId ?? null}
+        defaultAudience={generatorContext?.audience}
+        defaultPlatform={generatorContext?.platform}
       />
     </div>
   );
