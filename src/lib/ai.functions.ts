@@ -4,6 +4,8 @@ import { z } from "zod";
 
 const GenerateHooksSchema = z.object({
   product: z.string().trim().min(1).max(200),
+  brandContext: z.string().trim().max(200).nullable().optional(),
+  brandMode: z.enum(["winner", "project", "custom"]).default("project"),
   productUrl: z.string().trim().max(500).nullable().optional(),
   audience: z.string().trim().max(500).default(""),
   platform: z.string().trim().max(30).default("both"),
@@ -42,6 +44,8 @@ export const generateHooksFn = createServerFn({ method: "POST" })
     const provider = await getProviderForUser(userId);
     const generated = await generateHooks({
       product: data.product,
+      brandContext: data.brandContext ?? null,
+      brandMode: data.brandMode,
       productUrl: data.productUrl ?? null,
       audience: data.audience,
       platform: data.platform,
