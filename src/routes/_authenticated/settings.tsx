@@ -173,13 +173,7 @@ function SettingsPage() {
           </dl>
         </section>
 
-        <section className="panel space-y-3 p-6">
-          <h2 className="text-sm font-semibold">AI provider</h2>
-          <p className="text-sm text-muted-foreground">
-            Hook generation runs server-side through a provider abstraction, so OpenAI or Anthropic can be
-            swapped in later without touching the app. No API keys are ever exposed to the browser.
-          </p>
-        </section>
+        <AiProviderSettings />
       </div>
     </div>
   );
