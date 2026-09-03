@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Quote, Plus, Search, Trash2, Trophy, Pencil, Sparkles } from "lucide-react";
+import { Quote, Plus, Search, Trash2, Trophy, Pencil, Sparkles, BrainCircuit } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { HOOK_CATEGORIES, PLATFORMS } from "@/lib/constants";
 import { fmtNumber } from "@/lib/db";
