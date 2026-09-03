@@ -91,8 +91,8 @@ export function StudyWinnersDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {PLATFORMS.map((p) => (
-                    <SelectItem key={p.value ?? p} value={String(p.value ?? p)}>
-                      {String(p.label ?? p)}
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
