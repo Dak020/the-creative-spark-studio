@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { HookGeneratorDialog } from "@/components/HookGeneratorDialog";
+import { StudyWinnersDialog } from "@/components/StudyWinnersDialog";
 
 export type Hook = {
   id: string;
@@ -64,6 +65,7 @@ export function HookLibraryPanel({
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
+  const [studyOpen, setStudyOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyHook });
 
@@ -405,6 +407,14 @@ export function HookLibraryPanel({
         projectId={projectId ?? null}
         winners={(hooks ?? []).filter((h) => h.is_winner)}
         defaults={generatorContext}
+      />
+
+      <StudyWinnersDialog
+        open={studyOpen}
+        onOpenChange={setStudyOpen}
+        projectId={projectId ?? null}
+        defaultAudience={generatorContext?.audience}
+        defaultPlatform={generatorContext?.platform}
       />
     </div>
   );
