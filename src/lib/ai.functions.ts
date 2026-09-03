@@ -83,7 +83,63 @@ const ScoreSchema = z.object({
 export const scoreHooksFn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => ScoreSchema.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const { scoreHooks } = await import("./ai/hooks-service.server");
-    return { scores: await scoreHooks(data.texts, data.audience, data.platform) };
+    const { getProviderForUser } = await import("./ai/provider.server");
+    const provider = await getProviderForUser(context.userId);
+    return { scores: await scoreHooks(data.texts, data.audience, data.platform, provider) };
+  });
+
+/** Study pasted winning hooks: extract structure, trigger and format, then save them as winners. */
+const StudySchema = z.object({
+  texts: z.array(z.string().trim().min(3).max(300)).min(1).max(25),
+  platform: z.string().trim().max(30).default("both"),
+  audience: z.string().trim().max(500).default(""),
+  projectId: z.string().uuid().nullable().optional(),
+  save: z.boolean().default(true),
+});
+
+export const studyWinnersFn = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => StudySchema.parse(input))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { analyzeHookStructure } = await import("./ai/hooks-service.server");
+    const { getProviderForUser } = await import("./ai/provider.server");
+    const provider = await getProviderForUser(userId);
+
+    const analysis = await analyzeHookStructure(
+      data.texts.map((t) => ({ text: t })),
+      provider,
+    );
+
+    const rows = data.texts.map((text, i) => ({
+      text,
+      structure: analysis[i]?.structure ?? "",
+      emotional_trigger: analysis[i]?.emotional_trigger ?? "",
+      format: analysis[i]?.format ?? "",
+    }));
+
+    if (!data.save) return { analyzed: rows, saved: [] };
+
+    const { data: saved, error } = await supabase
+      .from("hooks")
+      .insert(
+        rows.map((r) => ({
+          user_id: userId,
+          project_id: data.projectId ?? null,
+          text: r.text,
+          category: "Curiosity",
+          structure: r.structure,
+          emotional_trigger: r.emotional_trigger,
+          audience: data.audience || null,
+          platform: data.platform,
+          source: "studied",
+          is_winner: true,
+        })),
+      )
+      .select();
+    if (error) throw new Error(error.message);
+
+    return { analyzed: rows, saved: saved ?? [] };
   });
