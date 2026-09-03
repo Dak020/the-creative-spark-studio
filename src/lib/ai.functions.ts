@@ -49,7 +49,7 @@ export const generateHooksFn = createServerFn({ method: "POST" })
       count: data.count,
       categories: data.categories,
       winners,
-    });
+    }, provider);
 
     if (generated.length === 0) return { variants: [] };
 
