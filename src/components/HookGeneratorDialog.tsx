@@ -57,6 +57,8 @@ export function HookGeneratorDialog({
   const generate = useServerFn(generateHooksFn);
 
   const [product, setProduct] = useState(defaults?.product ?? "");
+  const [brandMode, setBrandMode] = useState<"winner" | "project" | "custom">("project");
+  const [customBrand, setCustomBrand] = useState("");
   const [audience, setAudience] = useState(defaults?.audience ?? "");
   const [platform, setPlatform] = useState(defaults?.platform ?? "both");
   const [contentStyle, setContentStyle] = useState(defaults?.contentStyle ?? "ugc");
@@ -75,9 +77,12 @@ export function HookGeneratorDialog({
   const run = useMutation({
     mutationFn: async () => {
       if (!product.trim()) throw new Error("Product name is required");
+      if (brandMode === "custom" && !customBrand.trim()) throw new Error("Enter the brand to use");
       const res = await generate({
         data: {
           product: product.trim(),
+          brandMode,
+          brandContext: brandMode === "winner" ? null : (brandMode === "custom" ? customBrand.trim() : product.trim()) || null,
           productUrl: defaults?.productUrl ?? null,
           audience: audience.trim(),
           platform,
@@ -172,6 +177,29 @@ export function HookGeneratorDialog({
               onChange={(e) => setCount(Math.min(25, Math.max(1, Number(e.target.value) || 1)))}
             />
           </div>
+          <div className="space-y-2">
+            <Label>Brand context for winner hooks</Label>
+            <Select value={brandMode} onValueChange={(value) => setBrandMode(value as "winner" | "project" | "custom")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="project">Use project product/brand</SelectItem>
+                <SelectItem value="winner">Keep winner's brand</SelectItem>
+                <SelectItem value="custom">Use a different brand</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {brandMode === "custom" ? (
+            <div className="space-y-2">
+              <Label htmlFor="g-brand">Brand to use</Label>
+              <Input
+                id="g-brand"
+                value={customBrand}
+                maxLength={200}
+                onChange={(e) => setCustomBrand(e.target.value)}
+                placeholder="Hobby Lobby"
+              />
+            </div>
+          ) : null}
           <div className="space-y-2 sm:col-span-2">
             <Label htmlFor="g-aud">Audience</Label>
             <Textarea
