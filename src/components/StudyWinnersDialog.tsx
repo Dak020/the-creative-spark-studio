@@ -31,8 +31,8 @@ export function StudyWinnersDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   projectId: string | null;
-  defaultAudience?: string;
-  defaultPlatform?: string;
+  defaultAudience?: string | undefined;
+  defaultPlatform?: string | undefined;
 }) {
   const qc = useQueryClient();
   const study = useServerFn(studyWinnersFn);
