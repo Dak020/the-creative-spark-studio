@@ -188,6 +188,10 @@ export function HookLibraryPanel({
           <Trophy className="size-4" />
           Winners
         </Button>
+        <Button variant="outline" onClick={() => setStudyOpen(true)}>
+          <BrainCircuit className="size-4" />
+          Study winners
+        </Button>
         <Button variant="secondary" onClick={() => setGenOpen(true)}>
           <Sparkles className="size-4" />
           Generate
