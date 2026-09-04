@@ -65,6 +65,21 @@ export function AuthPage() {
     }
   }
 
+  async function forgotPassword() {
+    const parsed = z.string().trim().email().safeParse(email);
+    if (!parsed.success) {
+      toast.error("Enter your email above first");
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success("Password reset link sent — check your inbox");
+  }
+
   async function google() {
     setBusy(true);
     const redirectUri = `${window.location.origin}/auth`;
@@ -149,6 +164,16 @@ export function AuthPage() {
                   {busy ? <Loader2 className="size-4 animate-spin" /> : null}
                   {mode === "signin" ? "Sign in" : "Create account"}
                 </Button>
+                {mode === "signin" ? (
+                  <button
+                    type="button"
+                    className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+                    disabled={busy}
+                    onClick={forgotPassword}
+                  >
+                    Forgot password?
+                  </button>
+                ) : null}
               </TabsContent>
             ))}
           </Tabs>

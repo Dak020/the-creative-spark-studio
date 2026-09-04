@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { VIDEO_DEFAULTS } from "@/lib/constants";
 import { formatBytes } from "@/lib/db";
 import { AiProviderSettings } from "@/components/AiProviderSettings";
+import { PasswordSettings } from "@/components/PasswordSettings";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -173,6 +174,8 @@ function SettingsPage() {
             ))}
           </dl>
         </section>
+
+        <PasswordSettings />
 
         <AiProviderSettings />
       </div>
