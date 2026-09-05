@@ -581,6 +581,50 @@ export type Database = {
         }
         Relationships: []
       }
+      render_feedback: {
+        Row: {
+          created_at: string
+          id: string
+          issues: string[]
+          project_id: string | null
+          rating: string
+          reason: string | null
+          updated_at: string
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          issues?: string[]
+          project_id?: string | null
+          rating: string
+          reason?: string | null
+          updated_at?: string
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          issues?: string[]
+          project_id?: string | null
+          rating?: string
+          reason?: string | null
+          updated_at?: string
+          user_id?: string
+          video_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "render_feedback_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "generated_videos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       render_jobs: {
         Row: {
           completed_at: string | null
