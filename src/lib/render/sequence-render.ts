@@ -230,8 +230,34 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
         video.currentTime = start;
         await waitFor(video, "seeked", { signal, timeoutMs: 15_000 });
       }
-      const segStartedAt = performance.now();
+      const willWaitForFrame = index > 0;
       await video.play();
+      // Wait for a REAL decoded frame before drawing this segment, not just
+      // the 'seeked' event — 'seeked' can fire slightly before the browser
+      // has actually decoded and is ready to present a frame at that
+      // position, which showed up as the segment holding on a stale/black
+      // frame for a beat before playback visibly started. This is the same
+      // fix already applied to the very first segment below; every segment
+      // needs it, not just the opener.
+      if (willWaitForFrame) {
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, 2000);
+          const finish = () => {
+            clearTimeout(t);
+            resolve();
+          };
+          if (typeof video.requestVideoFrameCallback === "function") {
+            video.requestVideoFrameCallback(() => finish());
+          } else {
+            requestAnimationFrame(() => requestAnimationFrame(() => finish()));
+          }
+        });
+        throwIfAborted(signal);
+      }
+      // Captured AFTER the frame-wait so that wait is never silently counted
+      // as elapsed segment playback time (it would make the stop condition
+      // below fire a bit early relative to what's actually been recorded).
+      const segStartedAt = performance.now();
 
       await new Promise<void>((resolve, reject) => {
         let done = false;
