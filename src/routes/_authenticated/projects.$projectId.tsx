@@ -39,6 +39,8 @@ import {
   runDnaVariant,
   runDnaBatch,
   describePlan,
+  commitDnaPreview,
+  deleteDnaPreview,
   type DnaClip,
   type DnaPlan,
 } from "@/lib/render/dna-pipeline";
@@ -93,6 +95,7 @@ function ProjectWorkspace() {
     item: BatchItem;
     plan: DnaPlan;
     clips: DnaClip[];
+    hook: { id: string; text: string };
   } | null>(null);
 
 
@@ -337,11 +340,18 @@ function ProjectWorkspace() {
       return;
     }
 
+    const previousPreview = dnaPreview;
     const controller = new AbortController();
     dnaAbortRef.current = controller;
     setDnaRunning(true);
     setDnaLive([]);
     setDnaPreview(null);
+    if (previousPreview) {
+      deleteDnaPreview(previousPreview.item).catch(() => {
+        // Best-effort — a failed cleanup here just leaves one orphaned file,
+        // not worth blocking the next preview render over.
+      });
+    }
     try {
       const clips = await resolveDnaClips();
       if (!clips) return;
@@ -362,6 +372,7 @@ function ProjectWorkspace() {
         hook,
         withAudio: originalSound,
         signal: controller.signal,
+        isPreview: true,
         onUpdate: (updated) => setDnaLive([updated]),
       });
 
@@ -373,7 +384,7 @@ function ProjectWorkspace() {
         toast.error(item.error ?? "The preview render failed.");
         return;
       }
-      setDnaPreview({ item, plan: planned.plan, clips });
+      setDnaPreview({ item, plan: planned.plan, clips, hook });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -389,9 +400,24 @@ function ProjectWorkspace() {
       toast.error("Add at least one hook to this project first.");
       return;
     }
+
+    try {
+      await commitDnaPreview({
+        userId: user.id,
+        projectId,
+        item: dnaPreview.item,
+        hook: dnaPreview.hook,
+        plan: dnaPreview.plan,
+      });
+    } catch (e) {
+      toast.error(`Could not save the approved preview: ${(e as Error).message}`);
+      return;
+    }
+
     const remaining = Math.max(0, quantity - 1);
     if (remaining === 0) {
-      toast.success("Preview approved — that's the full batch.");
+      toast.success("Preview approved and saved.");
+      setDnaPreview(null);
       await qc.invalidateQueries({ queryKey: ["project", projectId] });
       return;
     }
@@ -426,6 +452,19 @@ function ProjectWorkspace() {
       dnaAbortRef.current = null;
       setDnaPreview(null);
       await qc.invalidateQueries({ queryKey: ["project", projectId] });
+    }
+  }
+
+  async function discardDnaPreview() {
+    if (!dnaPreview) return;
+    const item = dnaPreview.item;
+    setDnaPreview(null);
+    try {
+      await deleteDnaPreview(item);
+    } catch (e) {
+      // Non-fatal: the preview is already cleared from the UI either way,
+      // this just means the orphaned file lingers in storage a bit longer.
+      toast.error(`Preview discarded, but cleanup failed: ${(e as Error).message}`);
     }
   }
 
@@ -743,7 +782,7 @@ function ProjectWorkspace() {
                 )}
                 Approve this style — render {Math.max(0, quantity - 1)} more
               </Button>
-              <Button variant="ghost" onClick={() => setDnaPreview(null)} disabled={dnaRunning}>
+              <Button variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
                 Discard preview
               </Button>
             </div>
