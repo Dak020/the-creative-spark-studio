@@ -64,12 +64,19 @@ export type DnaVariantInput = {
   hook: { id: string; text: string };
   withAudio?: boolean;
   signal?: AbortSignal | undefined;
+  /** When true, this render is a preview the user hasn't approved yet — the
+   *  video is still actually rendered and uploaded (so it can be watched
+   *  and judged), but no `generated_videos` row is written. Approving turns
+   *  the SAME output into a real result via commitDnaPreview below, and
+   *  discarding removes the uploaded file with deleteDnaPreview — either
+   *  way nothing permanent exists until the user has actually decided. */
+  isPreview?: boolean;
   onUpdate?: (item: BatchItem) => void;
 };
 
 /** Render + persist a single DNA variant. Returns its BatchItem. */
 export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> {
-  const { userId, projectId, plan, hook, withAudio } = input;
+  const { userId, projectId, plan, hook, withAudio, isPreview } = input;
   const openerId = plan.segments[0]!.media_asset_id;
   const opener = plan.clipById[openerId]!;
 
@@ -192,6 +199,32 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
     const url = await resolveRenderUrl(outPath);
     if (!url) throw new Error("Upload finished but the output file could not be read back.");
 
+    if (isPreview) {
+      // Nothing written to generated_videos yet — the file is uploaded and
+      // playable so the user can actually judge it, but it doesn't become a
+      // real, listed result until commitDnaPreview runs after approval.
+      await supabase
+        .from("render_jobs")
+        .update({
+          status: "processing",
+          progress: 99,
+          output_url: outPath,
+          error_message: null,
+        })
+        .eq("id", job.id);
+
+      patch({
+        outputPath: outPath,
+        thumbnailPath: thumbPath,
+        stage: "completed",
+        progress: 100,
+        url,
+        videoId: null,
+        filename: `dna-preview.${extension}`,
+      });
+      return item;
+    }
+
     const { data: video, error: videoErr } = await supabase
       .from("generated_videos")
       .insert({
@@ -259,6 +292,71 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
   }
 
   return item;
+}
+
+/**
+ * Turn an already-rendered preview into a real, listed result. Call this
+ * ONLY after the user approves — the video file was already uploaded during
+ * the preview render, so this just writes the generated_videos row that
+ * runDnaVariant skipped for a preview.
+ */
+export async function commitDnaPreview(input: {
+  userId: string;
+  projectId: string;
+  item: BatchItem;
+  hook: { id: string; text: string };
+  plan: DnaPlan;
+}): Promise<void> {
+  const { userId, projectId, item, hook, plan } = input;
+  if (!item.outputPath) throw new Error("No preview output to approve.");
+
+  const { error: videoErr } = await supabase.from("generated_videos").insert({
+    user_id: userId,
+    project_id: projectId,
+    render_job_id: item.jobId,
+    recipe_id: item.recipeId,
+    hook_id: hook.id,
+    media_asset_id: item.sourceAssetId,
+    hook_text: hook.text,
+    output_url: item.outputPath,
+    thumbnail_url: item.thumbnailPath,
+    duration: plan.finalDuration,
+    status: "completed",
+  });
+  if (videoErr) throw new Error(videoErr.message);
+
+  await supabase
+    .from("render_jobs")
+    .update({
+      status: "completed",
+      progress: 100,
+      output_url: item.outputPath,
+      error_message: null,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", item.jobId);
+}
+
+/**
+ * Discard an unapproved preview: remove the uploaded video/thumbnail from
+ * storage (nothing was ever written to generated_videos, so there's no row
+ * to delete) and mark its render_job cancelled so it doesn't linger as
+ * "processing" forever.
+ */
+export async function deleteDnaPreview(item: BatchItem): Promise<void> {
+  const paths = [item.outputPath, item.thumbnailPath].filter((p): p is string => Boolean(p));
+  if (paths.length > 0) {
+    await supabase.storage.from(RENDER_BUCKET).remove(paths);
+  }
+  await supabase
+    .from("render_jobs")
+    .update({
+      status: "cancelled",
+      progress: 100,
+      error_message: "Preview discarded",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", item.jobId);
 }
 
 export type DnaBatchInput = {
