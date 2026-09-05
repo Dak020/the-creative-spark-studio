@@ -176,10 +176,15 @@ function ProjectWorkspace() {
 
   // Only clips actually tagged with a DNA role participate — untagged clips
   // in this same project are invisible to DNA and keep working with the
-  // regular single/multi-clip flow above.
+  // regular single/multi-clip flow above. Also respects the same clip
+  // selection/filter as the regular batch flow (activeClipIds) — DNA should
+  // only draw from clips the user has actually selected for this batch, not
+  // silently pull in every DNA-tagged clip in the whole project regardless
+  // of what's currently filtered.
   const dnaClips = useMemo(
     () =>
       mediaList
+        .filter((m) => activeClipIds.includes(m.id))
         .filter((m) => m.dna_role === "start" || m.dna_role === "middle" || m.dna_role === "end")
         .map((m) => ({
           id: m.id,
@@ -193,7 +198,7 @@ function ProjectWorkspace() {
           filename: m.filename,
           storage_path: m.storage_path,
         })),
-    [mediaList],
+    [mediaList, activeClipIds],
   );
   const dnaRoles = useMemo(() => checkRoles(dnaClips), [dnaClips]);
 
