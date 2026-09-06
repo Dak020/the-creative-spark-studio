@@ -295,16 +295,19 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
             cancel();
             return;
           }
-          // Stop advancing the source once the cut boundary is reached — the last
-          // frame is held for whatever wall-clock time remains, never looped.
-          if (video.ended || video.currentTime >= seg.sourceOut - 0.03) {
-            if (!video.paused) video.pause();
-          }
+          // End the segment the moment its real footage runs out, instead of
+          // pausing and holding the final frame for the leftover time — that
+          // hold is what showed up as a freeze frame mid-edit.
+          const reachedCut = video.ended || video.currentTime >= end - 0.03;
           drawFrame();
           const segElapsed = (performance.now() - segStartedAt) / 1000;
-          const pct = ((elapsedBefore + segElapsed) / totalDuration) * 100;
+          const pct = ((elapsedBefore + Math.min(segElapsed, outputDuration)) / totalDuration) * 100;
           opts.onProgress?.(Math.min(99, Math.round(pct)));
-          if (segElapsed >= seg.outputDuration) finish();
+          if (reachedCut || segElapsed >= outputDuration) {
+            if (!video.paused) video.pause();
+            finish();
+          }
+
         };
         const FALLBACK_GAP_MS = 120;
         const timer = setInterval(() => {
