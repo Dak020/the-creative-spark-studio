@@ -88,7 +88,12 @@ function ProjectWorkspace() {
   // single-clip flow above, since a DNA render and a regular render are
   // different pipelines that can't run at the same time from this page.
   const [targetDuration, setTargetDuration] = useState("8");
+  // How many DNA variants a single approval produces (the approved preview
+  // counts as the first one). Selectable instead of following the single-clip
+  // batch quantity.
+  const [dnaQuantity, setDnaQuantity] = useState("4");
   const [originalSound, setOriginalSound] = useState(false);
+
   const [dnaRunning, setDnaRunning] = useState(false);
   const [dnaLive, setDnaLive] = useState<BatchItem[]>([]);
   const [dnaPreview, setDnaPreview] = useState<{
