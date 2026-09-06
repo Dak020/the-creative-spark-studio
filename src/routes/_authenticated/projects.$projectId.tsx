@@ -553,11 +553,11 @@ function ProjectWorkspace() {
         title={project.name}
         description={`${platformLabel(project.platform)} · ${styleLabel(project.content_style)} · ${audienceSummary(project)}`}
         actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1.5">
+          <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+            <div className="min-w-36 flex-1 space-y-1.5 sm:flex-none">
               <Label className="text-xs">Batch quantity</Label>
               <Select value={quantityChoice} onValueChange={setQuantityChoice}>
-                <SelectTrigger className="w-36">
+                <SelectTrigger className="w-full sm:w-36">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -586,12 +586,12 @@ function ProjectWorkspace() {
                 />
               </div>
             ) : null}
-            <Button onClick={() => void generateBatch()} disabled={running}>
+            <Button className="w-full sm:w-auto" onClick={() => void generateBatch()} disabled={running}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
               Render {quantity} variant{quantity === 1 ? "" : "s"}
             </Button>
             {running ? (
-              <Button variant="outline" onClick={cancelBatch}>
+              <Button className="w-full sm:w-auto" variant="outline" onClick={cancelBatch}>
                 Cancel
               </Button>
             ) : null}
@@ -802,7 +802,7 @@ function ProjectWorkspace() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void approveDna()} disabled={dnaRunning}>
+              <Button className="w-full sm:w-auto" onClick={() => void approveDna()} disabled={dnaRunning}>
                 {dnaRunning ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
@@ -810,7 +810,7 @@ function ProjectWorkspace() {
                 )}
                 Approve this style — render {Math.max(0, dnaCount - 1)} more
               </Button>
-              <Button variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
+              <Button className="w-full sm:w-auto" variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
                 Discard preview
               </Button>
             </div>
