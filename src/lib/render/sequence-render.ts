@@ -136,7 +136,9 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   const manualFrames = typeof track?.requestFrame === "function";
   const captureStream = manualFrames ? stream : canvas.captureStream(30);
 
-  const totalDuration = segments.reduce((s, seg) => s + seg.outputDuration, 0);
+  // Real total is only known after the clips report their true durations
+  // (see prepareVideo) — computed below from the clamped segment lengths.
+
 
   // Load every segment's video up front so cuts are instant (no black gap
   // between them) and so all audio sources can be wired before recording
