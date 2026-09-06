@@ -236,7 +236,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   try {
     for (let index = 0; index < prepared.length; index++) {
       throwIfAborted(signal);
-      const { video, start, seg } = prepared[index]!;
+      const { video, start, end, outputDuration } = prepared[index]!;
       currentVideo = video;
       // Hook stays burned in for the WHOLE edit, not just the opening cut.
       showHook = true;
