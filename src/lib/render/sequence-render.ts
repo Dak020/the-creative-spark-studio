@@ -67,8 +67,17 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: A
     const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
     video.currentTime = start;
     await waitFor(video, "seeked", { signal });
-    video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
-    return { video, start };
+    const rate = Math.max(0.25, Math.min(4, seg.speed || 1));
+    video.playbackRate = rate;
+    // Freeze-frame guard: the solver's cut can ask for more footage than the
+    // file actually holds (metadata duration vs. planned duration), and the
+    // old loop then held the LAST decoded frame for the leftover wall-clock
+    // time — that's exactly the frozen tail the user is seeing. Clamp the cut
+    // to real footage and shrink this segment's output length to match, so
+    // every recorded frame comes from real playback.
+    const end = Math.max(start + 0.05, Math.min(seg.sourceOut, realDuration));
+    const outputDuration = Math.max(0.2, (end - start) / rate);
+    return { video, start, end, outputDuration };
   } catch (e) {
     video.pause();
     video.removeAttribute("src");
@@ -76,6 +85,7 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: A
     throw e;
   }
 }
+
 
 
 export async function renderSequence(opts: SequenceRenderOptions): Promise<BrowserRenderResult> {
