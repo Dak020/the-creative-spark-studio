@@ -723,7 +723,22 @@ function ProjectWorkspace() {
               className="w-24"
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="dna-quantity" className="text-xs">
+              Variants (1–{MAX_QUANTITY})
+            </Label>
+            <Input
+              id="dna-quantity"
+              type="number"
+              min={1}
+              max={MAX_QUANTITY}
+              value={dnaQuantity}
+              onChange={(e) => setDnaQuantity(e.target.value)}
+              className="w-24"
+            />
+          </div>
           <Button
+            className="w-full sm:w-auto"
             variant="secondary"
             onClick={() => void runDnaPreview()}
             disabled={dnaRunning || !dnaRoles.ok}
@@ -736,11 +751,12 @@ function ProjectWorkspace() {
             {dnaPreview ? "Try a different combination" : "Preview one DNA render"}
           </Button>
           {dnaRunning ? (
-            <Button variant="outline" onClick={cancelDna}>
+            <Button className="w-full sm:w-auto" variant="outline" onClick={cancelDna}>
               Cancel
             </Button>
           ) : null}
         </div>
+
 
         {!dnaRoles.ok ? (
           <p className="text-xs text-destructive">{dnaRoles.reason}</p>
