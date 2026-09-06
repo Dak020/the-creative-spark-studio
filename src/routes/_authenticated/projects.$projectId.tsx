@@ -426,7 +426,7 @@ function ProjectWorkspace() {
       return;
     }
 
-    const remaining = Math.max(0, quantity - 1);
+    const remaining = Math.max(0, dnaCount - 1);
     if (remaining === 0) {
       toast.success("Preview approved and saved.");
       setDnaPreview(null);
@@ -454,9 +454,9 @@ function ProjectWorkspace() {
       });
       const done = items.filter((i) => i.stage === "completed").length;
       const cancelled = items.some((i) => i.error === "Cancelled");
-      if (cancelled) toast.info(`Cancelled — ${done + 1} of ${quantity} DNA variants had already finished`);
-      else if (done === items.length) toast.success(`${done + 1} of ${quantity} DNA variants rendered`);
-      else toast.warning(`${done + 1} of ${quantity} DNA variants rendered — check the failed jobs`);
+      if (cancelled) toast.info(`Cancelled — ${done + 1} of ${dnaCount} DNA variants had already finished`);
+      else if (done === items.length) toast.success(`${done + 1} of ${dnaCount} DNA variants rendered`);
+      else toast.warning(`${done + 1} of ${dnaCount} DNA variants rendered — check the failed jobs`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -792,7 +792,7 @@ function ProjectWorkspace() {
                 ) : (
                   <Play className="size-4" />
                 )}
-                Approve this style — render {Math.max(0, quantity - 1)} more
+                Approve this style — render {Math.max(0, dnaCount - 1)} more
               </Button>
               <Button variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
                 Discard preview
