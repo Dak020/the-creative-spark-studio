@@ -327,7 +327,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
       });
 
       video.pause();
-      elapsedBefore += seg.outputDuration;
+      elapsedBefore += outputDuration;
     }
   } catch (e) {
     // Cancelled mid-render: stop the recorder and tear everything down, but
