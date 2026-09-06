@@ -111,6 +111,13 @@ function ProjectWorkspace() {
     return Math.min(MAX_QUANTITY, Math.max(1, n));
   }, [quantityChoice, customQuantity]);
 
+  const dnaCount = useMemo(() => {
+    const n = Math.round(Number(dnaQuantity));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(MAX_QUANTITY, Math.max(1, n));
+  }, [dnaQuantity]);
+
+
   // Abandoned jobs (closed tab, crashed render) must not sit in the queue forever.
   useEffect(() => {
     if (!user) return;
