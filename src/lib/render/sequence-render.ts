@@ -157,7 +157,10 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
     }),
   );
 
+  const totalDuration = prepared.reduce((s, p) => s + p.outputDuration, 0);
+
   throwIfAborted(signal);
+
   if (withAudio) {
     for (const p of prepared) attachAudioTrack(p.video, captureStream);
   }
