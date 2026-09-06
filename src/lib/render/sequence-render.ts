@@ -67,8 +67,17 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: A
     const start = Math.max(0, Math.min(seg.sourceIn, Math.max(0, realDuration - 0.05)));
     video.currentTime = start;
     await waitFor(video, "seeked", { signal });
-    video.playbackRate = Math.max(0.25, Math.min(4, seg.speed || 1));
-    return { video, start };
+    const rate = Math.max(0.25, Math.min(4, seg.speed || 1));
+    video.playbackRate = rate;
+    // Freeze-frame guard: the solver's cut can ask for more footage than the
+    // file actually holds (metadata duration vs. planned duration), and the
+    // old loop then held the LAST decoded frame for the leftover wall-clock
+    // time — that's exactly the frozen tail the user is seeing. Clamp the cut
+    // to real footage and shrink this segment's output length to match, so
+    // every recorded frame comes from real playback.
+    const end = Math.max(start + 0.05, Math.min(seg.sourceOut, realDuration));
+    const outputDuration = Math.max(0.2, (end - start) / rate);
+    return { video, start, end, outputDuration };
   } catch (e) {
     video.pause();
     video.removeAttribute("src");
@@ -76,6 +85,7 @@ async function prepareVideo(seg: SequenceSegment, withAudio: boolean, signal?: A
     throw e;
   }
 }
+
 
 
 export async function renderSequence(opts: SequenceRenderOptions): Promise<BrowserRenderResult> {
@@ -126,7 +136,9 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   const manualFrames = typeof track?.requestFrame === "function";
   const captureStream = manualFrames ? stream : canvas.captureStream(30);
 
-  const totalDuration = segments.reduce((s, seg) => s + seg.outputDuration, 0);
+  // Real total is only known after the clips report their true durations
+  // (see prepareVideo) — computed below from the clamped segment lengths.
+
 
   // Load every segment's video up front so cuts are instant (no black gap
   // between them) and so all audio sources can be wired before recording
@@ -145,7 +157,10 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
     }),
   );
 
+  const totalDuration = prepared.reduce((s, p) => s + p.outputDuration, 0);
+
   throwIfAborted(signal);
+
   if (withAudio) {
     for (const p of prepared) attachAudioTrack(p.video, captureStream);
   }
@@ -221,7 +236,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
   try {
     for (let index = 0; index < prepared.length; index++) {
       throwIfAborted(signal);
-      const { video, start, seg } = prepared[index]!;
+      const { video, start, end, outputDuration } = prepared[index]!;
       currentVideo = video;
       // Hook stays burned in for the WHOLE edit, not just the opening cut.
       showHook = true;
@@ -280,16 +295,19 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
             cancel();
             return;
           }
-          // Stop advancing the source once the cut boundary is reached — the last
-          // frame is held for whatever wall-clock time remains, never looped.
-          if (video.ended || video.currentTime >= seg.sourceOut - 0.03) {
-            if (!video.paused) video.pause();
-          }
+          // End the segment the moment its real footage runs out, instead of
+          // pausing and holding the final frame for the leftover time — that
+          // hold is what showed up as a freeze frame mid-edit.
+          const reachedCut = video.ended || video.currentTime >= end - 0.03;
           drawFrame();
           const segElapsed = (performance.now() - segStartedAt) / 1000;
-          const pct = ((elapsedBefore + segElapsed) / totalDuration) * 100;
+          const pct = ((elapsedBefore + Math.min(segElapsed, outputDuration)) / totalDuration) * 100;
           opts.onProgress?.(Math.min(99, Math.round(pct)));
-          if (segElapsed >= seg.outputDuration) finish();
+          if (reachedCut || segElapsed >= outputDuration) {
+            if (!video.paused) video.pause();
+            finish();
+          }
+
         };
         const FALLBACK_GAP_MS = 120;
         const timer = setInterval(() => {
@@ -309,7 +327,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Brows
       });
 
       video.pause();
-      elapsedBefore += seg.outputDuration;
+      elapsedBefore += outputDuration;
     }
   } catch (e) {
     // Cancelled mid-render: stop the recorder and tear everything down, but

@@ -88,7 +88,12 @@ function ProjectWorkspace() {
   // single-clip flow above, since a DNA render and a regular render are
   // different pipelines that can't run at the same time from this page.
   const [targetDuration, setTargetDuration] = useState("8");
+  // How many DNA variants a single approval produces (the approved preview
+  // counts as the first one). Selectable instead of following the single-clip
+  // batch quantity.
+  const [dnaQuantity, setDnaQuantity] = useState("4");
   const [originalSound, setOriginalSound] = useState(false);
+
   const [dnaRunning, setDnaRunning] = useState(false);
   const [dnaLive, setDnaLive] = useState<BatchItem[]>([]);
   const [dnaPreview, setDnaPreview] = useState<{
@@ -105,6 +110,13 @@ function ProjectWorkspace() {
     if (!Number.isFinite(n)) return 1;
     return Math.min(MAX_QUANTITY, Math.max(1, n));
   }, [quantityChoice, customQuantity]);
+
+  const dnaCount = useMemo(() => {
+    const n = Math.round(Number(dnaQuantity));
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(MAX_QUANTITY, Math.max(1, n));
+  }, [dnaQuantity]);
+
 
   // Abandoned jobs (closed tab, crashed render) must not sit in the queue forever.
   useEffect(() => {
@@ -414,7 +426,7 @@ function ProjectWorkspace() {
       return;
     }
 
-    const remaining = Math.max(0, quantity - 1);
+    const remaining = Math.max(0, dnaCount - 1);
     if (remaining === 0) {
       toast.success("Preview approved and saved.");
       setDnaPreview(null);
@@ -442,9 +454,9 @@ function ProjectWorkspace() {
       });
       const done = items.filter((i) => i.stage === "completed").length;
       const cancelled = items.some((i) => i.error === "Cancelled");
-      if (cancelled) toast.info(`Cancelled — ${done + 1} of ${quantity} DNA variants had already finished`);
-      else if (done === items.length) toast.success(`${done + 1} of ${quantity} DNA variants rendered`);
-      else toast.warning(`${done + 1} of ${quantity} DNA variants rendered — check the failed jobs`);
+      if (cancelled) toast.info(`Cancelled — ${done + 1} of ${dnaCount} DNA variants had already finished`);
+      else if (done === items.length) toast.success(`${done + 1} of ${dnaCount} DNA variants rendered`);
+      else toast.warning(`${done + 1} of ${dnaCount} DNA variants rendered — check the failed jobs`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -541,11 +553,11 @@ function ProjectWorkspace() {
         title={project.name}
         description={`${platformLabel(project.platform)} · ${styleLabel(project.content_style)} · ${audienceSummary(project)}`}
         actions={
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1.5">
+          <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+            <div className="min-w-36 flex-1 space-y-1.5 sm:flex-none">
               <Label className="text-xs">Batch quantity</Label>
               <Select value={quantityChoice} onValueChange={setQuantityChoice}>
-                <SelectTrigger className="w-36">
+                <SelectTrigger className="w-full sm:w-36">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -574,12 +586,12 @@ function ProjectWorkspace() {
                 />
               </div>
             ) : null}
-            <Button onClick={() => void generateBatch()} disabled={running}>
+            <Button className="w-full sm:w-auto" onClick={() => void generateBatch()} disabled={running}>
               {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
               Render {quantity} variant{quantity === 1 ? "" : "s"}
             </Button>
             {running ? (
-              <Button variant="outline" onClick={cancelBatch}>
+              <Button className="w-full sm:w-auto" variant="outline" onClick={cancelBatch}>
                 Cancel
               </Button>
             ) : null}
@@ -711,7 +723,22 @@ function ProjectWorkspace() {
               className="w-24"
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="dna-quantity" className="text-xs">
+              Variants (1–{MAX_QUANTITY})
+            </Label>
+            <Input
+              id="dna-quantity"
+              type="number"
+              min={1}
+              max={MAX_QUANTITY}
+              value={dnaQuantity}
+              onChange={(e) => setDnaQuantity(e.target.value)}
+              className="w-24"
+            />
+          </div>
           <Button
+            className="w-full sm:w-auto"
             variant="secondary"
             onClick={() => void runDnaPreview()}
             disabled={dnaRunning || !dnaRoles.ok}
@@ -724,11 +751,12 @@ function ProjectWorkspace() {
             {dnaPreview ? "Try a different combination" : "Preview one DNA render"}
           </Button>
           {dnaRunning ? (
-            <Button variant="outline" onClick={cancelDna}>
+            <Button className="w-full sm:w-auto" variant="outline" onClick={cancelDna}>
               Cancel
             </Button>
           ) : null}
         </div>
+
 
         {!dnaRoles.ok ? (
           <p className="text-xs text-destructive">{dnaRoles.reason}</p>
@@ -774,15 +802,15 @@ function ProjectWorkspace() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void approveDna()} disabled={dnaRunning}>
+              <Button className="w-full sm:w-auto" onClick={() => void approveDna()} disabled={dnaRunning}>
                 {dnaRunning ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   <Play className="size-4" />
                 )}
-                Approve this style — render {Math.max(0, quantity - 1)} more
+                Approve this style — render {Math.max(0, dnaCount - 1)} more
               </Button>
-              <Button variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
+              <Button className="w-full sm:w-auto" variant="ghost" onClick={() => void discardDnaPreview()} disabled={dnaRunning}>
                 Discard preview
               </Button>
             </div>
